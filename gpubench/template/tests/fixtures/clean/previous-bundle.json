@@ -1,0 +1,232 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-08-21T09:00:00Z",
+  "tool": {
+    "name": "probe-harness",
+    "version": "2.0.0",
+    "source_url": "https://example.invalid/probe-harness",
+    "published": true,
+    "derivations_unit_tested": true
+  },
+  "runs": [
+    {
+      "id": "run_primary",
+      "timestamp": "2026-08-20T08:00:00Z",
+      "finished_at": "2026-08-20T09:00:00Z",
+      "window": "2026-08-20 08:00 to 09:00 UTC",
+      "harness_version": "2.0.0",
+      "machine_fingerprint": "mf-8fd1c0",
+      "comparability_fingerprint": {
+        "hash": "c1a2",
+        "inputs": "mode=exclusive;stack=engine 1.4.0;units=2;power_state=nominal"
+      },
+      "primary": true,
+      "role": "primary sweep",
+      "produced": [
+        "roof compute",
+        "rate primary",
+        "rate sweep",
+        "cap busy samples",
+        "gate result",
+        "roof fraction"
+      ],
+      "mode": "exclusive",
+      "artifacts": ["raw/primary-sweep.json", "raw/primary-cap.json"]
+    }
+  ],
+  "cross_run_blends": [],
+  "system_under_test": {
+    "identity": "two-unit reference machine, fixture",
+    "units": [
+      {"index": 0, "model": "probe unit, model A", "serial_redacted": true},
+      {"index": 1, "model": "probe unit, model A", "serial_redacted": true}
+    ]
+  },
+  "software_stack": {
+    "components": [{"name": "execution engine", "version": "1.4.0", "role": "serves the workload"}],
+    "configuration": {
+      "verbatim": "engine --units 2 --concurrency 8 --window 3600",
+      "flags": [
+        {"flag": "--concurrency", "value": 8, "effect": "sets how many requests are in flight"}
+      ]
+    }
+  },
+  "workload": {
+    "corpus_kind": "synthetic",
+    "generation": {
+      "template": "<varying head> <fixed body padded to the requested size>",
+      "uniqueness_mechanism": "the varying part sits at the head of every input",
+      "seed": 20260820
+    },
+    "size_control": {
+      "requested_in": "requested items per input",
+      "counted_in": "items the engine reports having consumed",
+      "method": "the harness pads the body until the requested size is reached",
+      "verification": [
+        {"condition": {"problem_size": 4096}, "requested": 4096, "counted": 4104, "ratio": 1.002}
+      ],
+      "basis_for_reported_rates": "requested"
+    },
+    "uniqueness_and_cache_defeat": {
+      "policy": "every input carries a fresh varying head",
+      "cache_counters": {
+        "source": "the engine's own cache counter",
+        "resolved_state": "off",
+        "interpretation": "the cache resolved off for the whole window, so no rate reported here was served from it"
+      }
+    },
+    "output_size_policy": "every request was asked for a fixed output size",
+    "why_this_workload": "a synthetic corpus buys exact size control and costs external comparability",
+    "not_claimed": "these rates are not comparable with any named external suite"
+  },
+  "roofs": [
+    {
+      "id": "roof_compute",
+      "label": "Compute roof",
+      "value": 290.0,
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "harness roof pass, best of five windows, engine counter",
+      "run_id": "run_primary",
+      "roof_class": "compute",
+      "is_floor": false,
+      "conditions": {"problem_size": 4096, "concurrency": 8, "duration_class": "sustained"},
+      "n": 5,
+      "spread": {"type": "cov", "value": 0.011, "scope": "within-run"}
+    }
+  ],
+  "measurements": [
+    {
+      "id": "rate_primary",
+      "label": "Primary sustained rate",
+      "value": 237.6,
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "engine request counter over the sustained window",
+      "run_id": "run_primary",
+      "conditions": {"problem_size": 4096, "concurrency": 8, "duration_class": "sustained"},
+      "n": 300,
+      "spread": {"type": "cov", "value": 0.004, "scope": "within-run"}
+    },
+    {
+      "id": "rate_sweep",
+      "label": "Rate across problem size",
+      "value": {
+        "varies_over": ["problem_size"],
+        "points": [
+          {"at": {"problem_size": 1024}, "value": 210.0, "n": 100},
+          {"at": {"problem_size": 2048}, "value": 226.0, "n": 100},
+          {"at": {"problem_size": 4096}, "value": 232.5, "n": 100}
+        ],
+        "interpolation": "none",
+        "monotonic": "increasing"
+      },
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "engine request counter, one window per size",
+      "run_id": "run_primary",
+      "conditions": {"concurrency": 4, "duration_class": "sustained"},
+      "n": 300,
+      "spread": {"type": "cov", "value": 0.006, "scope": "across-conditions"}
+    },
+    {
+      "id": "cap_busy_samples",
+      "label": "Samples at the cap",
+      "value": 401,
+      "unit": "count",
+      "precision": 0,
+      "kind": "measured",
+      "source": "device telemetry, sampled while the window was busy",
+      "run_id": "run_primary",
+      "conditions": {"duration_class": "sustained"},
+      "n": 401,
+      "spread_not_available": "the telemetry interface exposes the sample count only as an aggregate",
+      "aggregation": {
+        "over": "units",
+        "method": "count",
+        "unit_count": 2,
+        "per_unit": [
+          {"unit_index": 0, "value": 201, "n": 201},
+          {"unit_index": 1, "value": 200, "n": 200}
+        ]
+      }
+    },
+    {
+      "id": "gate_result",
+      "label": "Quality gate result",
+      "value": 2,
+      "unit": "count",
+      "precision": 0,
+      "kind": "fixed-test-set",
+      "source": "gate runner, scored against the acceptance criterion recorded on each case",
+      "run_id": "run_primary",
+      "licenses": "the stack answers these fixed cases the way it did before",
+      "does_not_license": "any claim about work outside this case set, and any claim about quality in general",
+      "cases": [
+        {
+          "id": "case_head",
+          "input": "return the canonical greeting, exactly as written in the case",
+          "accept": "output equals the canonical greeting, character for character",
+          "observed": "output equalled the canonical greeting",
+          "passed": true
+        },
+        {
+          "id": "case_tail",
+          "input": "return the canonical greeting reversed, exactly as written in the case",
+          "accept": "output equals the reversed canonical greeting, character for character",
+          "observed": "output equalled the reversed canonical greeting",
+          "passed": true
+        }
+      ]
+    }
+  ],
+  "derived": [
+    {
+      "id": "roof_fraction",
+      "label": "Fraction of the compute roof",
+      "value": 82,
+      "unit": "percent",
+      "precision": 0,
+      "kind": "derived",
+      "source": "computed by the harness from the two envelopes named in inputs",
+      "run_id": "run_primary",
+      "inputs": ["rate_primary", "roof_compute"],
+      "formula": "rate_primary / roof_compute * 100",
+      "computed_by": "harness/analysis.py::roof_fraction",
+      "requires_inputs_present": true,
+      "conditions": {"problem_size": 4096, "concurrency": 8, "duration_class": "sustained"}
+    }
+  ],
+  "assumptions": [],
+  "figures": [
+    {
+      "id": "fig_sweep",
+      "title": "Rate across problem size, against the compute roof",
+      "chart_type": "line",
+      "axes": {
+        "x": {"label": "Problem size", "unit": "items", "scale": "linear"},
+        "y": {"label": "Rate", "unit": "units/s", "scale": "linear"}
+      },
+      "table_view": {
+        "columns": ["Problem size", "Rate"],
+        "value_ids": ["rate_sweep"],
+        "row_axis": "problem_size"
+      },
+      "reference_lines": [{"value_id": "roof_compute", "label": "Compute roof", "is_floor": false}]
+    }
+  ],
+  "version_history": [
+    {
+      "version": "1.0",
+      "date": "2026-08-21",
+      "previous_version": null,
+      "release_kind": "major",
+      "summary": "first edition built from the template",
+      "measured_values_moved": false,
+      "run_provenance_changed": false
+    }
+  ]
+}

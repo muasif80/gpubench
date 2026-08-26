@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gpubench"
+version = "1.1.0"
+description = "Benchmark a GPU inference machine, work out which ceiling binds it, and publish the result"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Muhammad Asif" }]
+keywords = ["benchmark", "gpu", "inference", "roofline", "llm", "vllm"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Benchmark",
+]
+
+# No runtime dependencies. Every probe, derivation, diagnostic and the report engine are standard
+# library only, because the machines most worth measuring are the ones where nothing may be
+# installed. PDF and DOCX export are the sole exception and are optional extras.
+dependencies = []
+
+[project.optional-dependencies]
+pdf = ["playwright>=1.40", "pymupdf>=1.23"]
+
+[project.scripts]
+gpubench = "gpubench.cli:main"
+
+[tool.setuptools]
+packages = ["gpubench", "gpubench.probes", "gpubench.longform", "gpubench.template"]

@@ -1,0 +1,6 @@
+{
+  "document_control": "This edition is {{ver:version}} of a fixture report, built by {{ver:tool_name}} at version {{ver:tool_version}}.",
+  "results": "Read together, the machine is reaching roughly 80 percent of the compute roof it was measured against, which is a good result for a stack nobody has tuned.",
+  "quality_gate": "The gate ran the published case set ({{ev:gate_result.cases}}) and returned {{v:gate_result}}. What a pass licenses, and what it does not, are rendered from the envelope beside the result.",
+  "reproducing": "At 83 percent of the compute roof, a second machine buys less than tuning this machine does, so the recommendation is to tune before buying."
+}

@@ -1,0 +1,18 @@
+# Keep LF in the working tree on every platform.
+#
+# This is not style. The probe scripts are piped over stdin into a POSIX shell on the target
+# machine, and a CRLF line ending arrives there as `$'\r': command not found` -- or worse,
+# mis-parses `for ... do` and function bodies, which looks like a quoting mistake in the script
+# rather than a property of the pipe. That cost a production maintenance window to diagnose once.
+#
+# The transport normalises newlines defensively as well, but a checkout that never introduces them
+# is the cheaper half of the fix.
+* text=auto eol=lf
+
+# Binary, never touched.
+*.png binary
+*.jpg binary
+*.pdf binary
+*.docx binary
+*.tar.gz binary
+*.zip binary

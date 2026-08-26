@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fixture: a rendered report that satisfies every rule</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:52rem;margin:0 auto;padding:2rem}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:.35rem .5rem;text-align:left}</style>
+</head>
+<body>
+<main>
+
+<section data-section="document_control">
+<h2>1. Document control</h2>
+<p>This edition is <span data-ver="version">1.1</span> of a fixture report, built by <span data-field="tool.name">probe-harness</span> at version <span data-field="tool.version">2.1.0</span>. The register below is generated from the bundle, so the set of contributing run artefacts is data rather than narrative.</p>
+<table data-run-register="true">
+<thead><tr><th>Run</th><th>Window</th><th>Role</th><th>Mode</th><th>Harness</th><th>Machine</th><th>Conditions digest</th></tr></thead>
+<tbody>
+<tr data-run-id="run_primary">
+<td data-field="runs.run_primary.id">run_primary</td>
+<td data-field="runs.run_primary.window">2026-08-20 08:00 to 09:00 UTC</td>
+<td data-field="runs.run_primary.role">primary sweep</td>
+<td data-field="runs.run_primary.mode">exclusive</td>
+<td data-field="runs.run_primary.harness_version">2.1.0</td>
+<td data-field="runs.run_primary.machine_fingerprint">mf-8fd1c0</td>
+<td data-field="runs.run_primary.comparability_fingerprint.hash">c1a2</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="results">
+<h2>2. What the work reached</h2>
+<p>The workload held <span data-value-id="rate_primary">238.4 units/s</span> for the whole sustained window, against a measured compute roof of <span data-value-id="roof_compute">290.0 units/s</span>, which puts it at <span data-value-id="roof_fraction">82 percent</span> of that roof. The corpus behind those figures is disclosed in <a href="#workload" data-section-ref="workload">section 3 (What was submitted)</a>.</p>
+<p>Telemetry sat at the configured limit for <span data-value-id="cap_busy_samples">401 of 401 busy samples, aggregated across both units</span>, so the configured limit, and not the roof, is the thing to talk about.</p>
+<figure data-figure="fig_sweep">
+<svg viewBox="0 0 320 160" role="img" aria-label="rate across problem size, drawn against the compute roof">
+<g data-series-value-id="rate_sweep"><polyline fill="none" stroke="currentColor" points="20,120 160,92 300,78"/></g>
+<line x1="20" y1="34" x2="300" y2="34" stroke="currentColor" stroke-dasharray="4 3"/>
+</svg>
+<figcaption><span data-fig-label="fig_sweep">Figure 1</span>. Rate across problem size, with the compute roof drawn as a reference line. Every point drawn here is rendered in the table view below.</figcaption>
+</figure>
+<table data-figure="fig_sweep">
+<caption>Table view of the figure above, rendered at the envelope's own precision.</caption>
+<thead><tr><th>Problem size</th><th>Rate</th></tr></thead>
+<tbody>
+<tr><th data-axis-of="rate_sweep" data-axis-key="problem_size">1024</th><td data-value-id="rate_sweep" data-point-at="1024">210.0 units/s</td></tr>
+<tr><th data-axis-of="rate_sweep" data-axis-key="problem_size">2048</th><td data-value-id="rate_sweep" data-point-at="2048">226.0 units/s</td></tr>
+<tr><th data-axis-of="rate_sweep" data-axis-key="problem_size">4096</th><td data-value-id="rate_sweep" data-point-at="4096">232.5 units/s</td></tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="workload" id="workload">
+<h2>3. What was submitted</h2>
+<p>Inputs were generated from a template whose varying part sits at the head of every input, so no input repeats and no prefix can be reused. Size was requested in <span data-field="workload.size_control.requested_in">requested items per input</span> and counted in <span data-field="workload.size_control.counted_in">items the engine reports having consumed</span>, and every rate here is quoted on the <span data-field="workload.size_control.basis_for_reported_rates">counted</span> basis.</p>
+<p>The cache state was read rather than argued. The counter source was <span data-field="workload.uniqueness_and_cache_defeat.cache_counters.source">the engine's own cache counter, read at the start and the end of the window</span>, it resolved to <span data-field="workload.uniqueness_and_cache_defeat.cache_counters.resolved_state">off</span>, and the reading licenses exactly this: <span data-field="workload.uniqueness_and_cache_defeat.cache_counters.interpretation">the cache resolved off for the whole window, so no rate reported here was served from it</span>.</p>
+<p>What this workload does not establish: <span data-field="workload.not_claimed">these rates are not comparable with any named external suite, because the input distribution is ours and no suite specifies it</span>.</p>
+</section>
+
+<section data-section="quality_gate">
+<h2>4. Quality gate</h2>
+<p>The gate ran the <span data-evidence="gate_result.cases">published case set</span> below and returned <span data-value-id="gate_result">2 of 2 cases passed</span>. What a pass licenses: the stack answers these fixed cases the way it did before. What it does not license: any claim about work outside this case set, and any claim about quality in general.</p>
+<table>
+<caption>The case set, published in full.</caption>
+<thead><tr><th>Case</th><th>Input, verbatim</th><th>Acceptance criterion</th><th>Observed</th><th>Result</th></tr></thead>
+<tbody>
+<tr data-case-id="case_head">
+<td>case_head</td>
+<td>return the canonical greeting, exactly as written in the case</td>
+<td>output equals the canonical greeting, character for character</td>
+<td>output equalled the canonical greeting</td>
+<td>pass</td>
+</tr>
+<tr data-case-id="case_tail">
+<td>case_tail</td>
+<td>return the canonical greeting reversed, exactly as written in the case</td>
+<td>output equals the reversed canonical greeting, character for character</td>
+<td>output equalled the reversed canonical greeting</td>
+<td>pass</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="reproducing">
+<h2>5. Reproducing this</h2>
+<p>The harness is published: <span data-evidence="tool.source_url">the source, tagged at the harness version shown in the register above</span>. The raw artefacts of the contributing run are named in the bundle, and the corpus can be regenerated from its recipe and its seed: <span data-evidence="workload.generation">the template, the uniqueness mechanism and the seed</span>.</p>
+</section>
+
+<section data-section="version_history">
+<h2>6. Version history</h2>
+<p>Every edition is carried below as a chain, each entry naming the edition it follows, so a missing edition breaks the walk instead of passing unnoticed.</p>
+<table>
+<thead><tr><th>Edition</th><th>Date</th><th>Follows</th><th>What changed</th><th>Values moved</th></tr></thead>
+<tbody>
+<tr>
+<td data-field="version_history.0.version">1.1</td>
+<td data-field="version_history.0.date">2026-08-26</td>
+<td data-field="version_history.0.previous_version">1.0</td>
+<td data-field="version_history.0.summary">every rate moved onto the counted basis, so the headline rate is restated with both readings</td>
+<td data-field="version_history.0.moved_values.0.value_id">rate_primary</td>
+</tr>
+<tr>
+<td data-field="version_history.1.version">1.0</td>
+<td data-field="version_history.1.date">2026-08-21</td>
+<td>none, this is the first edition</td>
+<td data-field="version_history.1.summary">first edition built from the template</td>
+<td>none</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+</main>
+</body>
+</html>

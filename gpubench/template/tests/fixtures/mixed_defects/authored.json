@@ -1,0 +1,7 @@
+{
+  "document_control": "This edition is {{ver:version}} of a fixture report, built by {{ver:tool_name}} at version {{ver:tool_version}}.",
+  "results": "The burst rate was {{v:burst_rate_high_precision}}, unchanged from the {{v:burst_rate_reference}} the earlier pass reported, so the machine is stable across editions. The roof it was measured against is {{v:roof_shared}}, which is what the units reached with the work resident. The configured limit held for every one of the 201 busy samples, which is why the limit and not the roof is the thing to talk about. The thermal side of this is in {{sec:thermal_headroom}}.",
+  "workload": "Inputs are unique by construction, so nothing measured here was served from a cache. The mixture is weighted towards the smallest size, whose assumed share is {{v:mixture_share_short}}. Across that mixture the rate works out at {{v:throughput_weighted_mean}}, and the short-size share of {{v:mixture_share_short}} is what drives it.",
+  "quality_gate": "The gate returned {{v:quality_gate_result}}, a pass.",
+  "reproducibility": "The harness and the raw data are published, so anyone can reproduce these numbers."
+}

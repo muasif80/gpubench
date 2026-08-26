@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: D7, a version history missing two of its own editions</title>
+</head>
+<body>
+<main>
+
+<!--
+  This fixture reproduces historical defect D7.
+
+  The edition being built is 8.4. The history has no entry for it. Following previous_version from
+  the one null-predecessor entry visits six of the eight entries: 7.1 and 7.2 are unreachable,
+  because 8.0 points back past them to 6.4, so two editions of the report are missing from the
+  report's own history. Two entries claim to follow 6.4. One entry is dated before its own
+  predecessor along the chain. And a version string is typed into the prose instead of being
+  rendered from the history, which is how a version fact comes to exist in two places.
+
+  This report is defective in other ways too (it renders only part of its bundle, for
+  instance), so other rules fire on it as well. Each test filters the findings to the rule
+  it is proving, and RuleCoverageTests.test_every_rule_test_is_load_bearing stubs that rule
+  out to prove the assertion is carried by the rule and not by a neighbour.
+-->
+
+<section data-section="document_control">
+<h2>1. Document control</h2>
+<p>This edition is <span data-ver="version">8.4</span> of a fixture report. Since 8.2 the figures have moved twice, and the history below records what changed.</p>
+<table data-run-register="true">
+<thead><tr><th>Run</th><th>Window</th><th>Role</th><th>Mode</th><th>Harness</th><th>Machine</th><th>Conditions digest</th></tr></thead>
+<tbody>
+<tr data-run-id="run_primary">
+<td data-field="runs.run_primary.id">run_primary</td>
+<td data-field="runs.run_primary.window">2026-08-20 08:00 to 09:00 UTC</td>
+<td data-field="runs.run_primary.role">primary sweep</td>
+<td data-field="runs.run_primary.mode">exclusive</td>
+<td data-field="runs.run_primary.harness_version">2.1.0</td>
+<td data-field="runs.run_primary.machine_fingerprint">mf-8fd1c0</td>
+<td data-field="runs.run_primary.comparability_fingerprint.hash">c1a2</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="version_history">
+<h2>2. Version history</h2>
+<p>Every edition is listed below, newest first.</p>
+<table>
+<thead><tr><th>Edition</th><th>Date</th><th>Follows</th><th>What changed</th></tr></thead>
+<tbody>
+<tr><td data-field="version_history.0.version">8.3</td><td data-field="version_history.0.date">2026-08-25</td><td data-field="version_history.0.previous_version">8.2</td><td data-field="version_history.0.summary">the matrices were size-controlled, so every fraction moved</td></tr>
+<tr><td data-field="version_history.1.version">8.2</td><td data-field="version_history.1.date">2026-08-19</td><td data-field="version_history.1.previous_version">8.0</td><td data-field="version_history.1.summary">the roofs were re-measured</td></tr>
+<tr><td data-field="version_history.2.version">8.0</td><td data-field="version_history.2.date">2026-08-20</td><td data-field="version_history.2.previous_version">6.4</td><td data-field="version_history.2.summary">the report was restructured</td></tr>
+<tr><td data-field="version_history.3.version">7.2</td><td data-field="version_history.3.date">2026-08-18</td><td data-field="version_history.3.previous_version">7.1</td><td data-field="version_history.3.summary">a second interconnect pass was added</td></tr>
+<tr><td data-field="version_history.4.version">7.1</td><td data-field="version_history.4.date">2026-08-19</td><td data-field="version_history.4.previous_version">6.4</td><td data-field="version_history.4.summary">the power pass was added</td></tr>
+<tr><td data-field="version_history.5.version">6.4</td><td data-field="version_history.5.date">2026-08-10</td><td data-field="version_history.5.previous_version">6.0</td><td data-field="version_history.5.summary">the capacity section was added</td></tr>
+<tr><td data-field="version_history.6.version">6.0</td><td data-field="version_history.6.date">2026-08-02</td><td data-field="version_history.6.previous_version">1.0</td><td data-field="version_history.6.summary">the roofline analysis was added</td></tr>
+<tr><td data-field="version_history.7.version">1.0</td><td data-field="version_history.7.date">2026-07-28</td><td>none, this is the first edition</td><td data-field="version_history.7.summary">first edition</td></tr>
+</tbody>
+</table>
+</section>
+
+</main>
+</body>
+</html>

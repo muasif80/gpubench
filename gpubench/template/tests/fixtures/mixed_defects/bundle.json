@@ -1,0 +1,304 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-08-26T11:30:00Z",
+  "tool": {
+    "name": "probe-harness",
+    "version": "2.1.0",
+    "published": false,
+    "derivations_unit_tested": true
+  },
+  "runs": [
+    {
+      "id": "run_final",
+      "timestamp": "2026-08-20T08:00:00Z",
+      "finished_at": "2026-08-20T09:00:00Z",
+      "window": "2026-08-20 08:00 to 09:00 UTC",
+      "harness_version": "2.1.0",
+      "machine_fingerprint": "mf-8fd1c0",
+      "comparability_fingerprint": {
+        "hash": "a91c",
+        "inputs": "mode=exclusive;stack=engine 1.4.0;units=2"
+      },
+      "primary": true,
+      "role": "primary sweep",
+      "produced": ["burst rate high precision", "cap busy samples", "quality gate result", "rate as string", "mixture share short", "throughput weighted mean"],
+      "mode": "exclusive",
+      "artifacts": ["raw/final.json"]
+    },
+    {
+      "id": "run_instrumented",
+      "timestamp": "2026-08-12T21:00:00Z",
+      "finished_at": "2026-08-12T22:00:00Z",
+      "window": "2026-08-12 21:00 to 22:00 UTC",
+      "harness_version": "2.0.0",
+      "machine_fingerprint": "mf-8fd1c0",
+      "comparability_fingerprint": {
+        "hash": "4f02",
+        "inputs": "mode=shared;stack=engine 1.3.0;units=2"
+      },
+      "primary": false,
+      "role": "instrumentation pass",
+      "produced": ["burst rate reference", "roof shared"],
+      "mode": "shared",
+      "artifacts": ["raw/instrumented.json"],
+      "warnings": ["measured in shared mode, so every roof from this run is a floor"]
+    }
+  ],
+  "cross_run_blends": [],
+  "system_under_test": {
+    "identity": "two-unit reference machine, fixture",
+    "units": [
+      {"index": 0, "model": "probe unit, model A"},
+      {"index": 1, "model": "probe unit, model A"}
+    ]
+  },
+  "software_stack": {
+    "components": [{"name": "execution engine", "version": "1.4.0", "role": "serves the workload"}],
+    "configuration": {
+      "verbatim": "engine --units 2 --concurrency 8",
+      "flags": [{"flag": "--concurrency", "value": 8, "effect": "sets how many requests are in flight"}]
+    }
+  },
+  "workload": {
+    "corpus_kind": "synthetic",
+    "generation": {
+      "template": "<fixed body padded to the requested size> <varying tail>",
+      "uniqueness_mechanism": "a varying tail, which leaves the whole prefix shared and cacheable",
+      "seed": 7
+    },
+    "size_control": {
+      "requested_in": "requested items per input",
+      "counted_in": "items the engine reports having consumed",
+      "method": "the harness pads the body until the requested size is reached",
+      "verification": [
+        {"condition": {"problem_size": 4096}, "requested": 4096, "counted": 4104, "ratio": 1.002, "counter_source": "engine counter"}
+      ],
+      "basis_for_reported_rates": "requested"
+    },
+    "uniqueness_and_cache_defeat": {
+      "policy": "inputs are unique by construction, so a cache cannot serve a second request"
+    },
+    "output_size_policy": "every request was asked for a fixed output size",
+    "why_this_workload": "a synthetic corpus buys exact size control and costs external comparability",
+    "not_claimed": "these rates are not comparable with any named external suite",
+    "distribution": {
+      "kind": "assumption",
+      "rationale": "the shares are a guess at what a deployment would see; nothing here measured them, so the honest use of this mixture is to show the spread across sizes",
+      "shares": [
+        {"size": 512, "share": 0.35},
+        {"size": 1024, "share": 0.3},
+        {"size": 2048, "share": 0.2},
+        {"size": 4096, "share": 0.1},
+        {"size": 8192, "share": 0.05}
+      ]
+    }
+  },
+  "roofs": [
+    {
+      "id": "roof_shared",
+      "label": "Compute roof, shared mode",
+      "description": "the highest rate reached while other work was resident, so a floor and not a ceiling",
+      "value": 290.0,
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "harness roof pass during the instrumentation window",
+      "run_id": "run_instrumented",
+      "roof_class": "compute",
+      "is_floor": true,
+      "how_to_measure_true_ceiling": "repeat the roof pass in a maintenance window with nothing else resident",
+      "conditions": {"problem_size": 8192, "duration_class": "burst"},
+      "n": 5,
+      "spread": {"type": "cov", "value": 0.02, "scope": "within-run"}
+    }
+  ],
+  "measurements": [
+    {
+      "id": "burst_rate_high_precision",
+      "label": "Burst rate at the large size",
+      "value": 238.4,
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "engine request counter over a burst window",
+      "run_id": "run_final",
+      "conditions": {"problem_size": 8192, "duration_class": "burst"},
+      "n": 20,
+      "spread": {"type": "cov", "value": 0.004, "scope": "within-run"}
+    },
+    {
+      "id": "burst_rate_reference",
+      "label": "Burst rate at the reference size",
+      "value": 237.6,
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "engine request counter over a burst window in the instrumentation pass",
+      "run_id": "run_instrumented",
+      "conditions": {"problem_size": 4096, "duration_class": "burst"},
+      "n": 20,
+      "spread": {"type": "cov", "value": 0.005, "scope": "within-run"}
+    },
+    {
+      "id": "cap_busy_samples",
+      "label": "Samples at the cap",
+      "value": 401,
+      "unit": "count",
+      "precision": 0,
+      "kind": "measured",
+      "source": "device telemetry, sampled while the window was busy",
+      "run_id": "run_final",
+      "conditions": {"duration_class": "sustained"},
+      "n": 401,
+      "spread_not_available": "the telemetry interface exposes the count only as an aggregate",
+      "aggregation": {
+        "over": "units",
+        "method": "count",
+        "unit_count": 2,
+        "per_unit": [
+          {"unit_index": 0, "value": 201, "n": 201},
+          {"unit_index": 1, "value": 200, "n": 200}
+        ]
+      }
+    },
+    {
+      "id": "rate_as_string",
+      "label": "Rate, stored as text",
+      "value": "238.4",
+      "unit": "units/s",
+      "kind": "measured",
+      "source": "engine request counter, transcribed by hand into the bundle",
+      "run_id": "run_final",
+      "conditions": {"problem_size": 8192, "duration_class": "burst"},
+      "n": 20,
+      "spread": {"type": "cov", "value": 0.004, "scope": "within-run"}
+    },
+    {
+      "id": "quality_gate_result",
+      "label": "Quality gate result",
+      "value": 10,
+      "unit": "count",
+      "precision": 0,
+      "kind": "fixed-test-set",
+      "source": "gate runner",
+      "run_id": "run_final",
+      "licenses": "the stack is not broken",
+      "does_not_license": "any claim that the system is accurate",
+      "cases": []
+    }
+  ],
+  "derived": [
+    {
+      "id": "throughput_weighted_mean",
+      "label": "Weighted mean rate across the mixture",
+      "value": 83.44,
+      "unit": "units/s",
+      "precision": 2,
+      "kind": "derived",
+      "source": "computed by the harness from the burst rate and the assumed share",
+      "run_id": "run_final",
+      "inputs": ["burst_rate_high_precision", "mixture_share_short"],
+      "formula": "burst_rate_high_precision * mixture_share_short",
+      "computed_by": "harness/analysis.py::weighted_mean",
+      "requires_inputs_present": true,
+      "from_distribution": "workload.distribution",
+      "conditions": {"problem_size": 8192, "duration_class": "burst"}
+    }
+  ],
+  "assumptions": [
+    {
+      "id": "mixture_share_short",
+      "label": "Share of the smallest size",
+      "value": 0.35,
+      "unit": "fraction",
+      "precision": 2,
+      "kind": "assumption",
+      "source": "chosen by the author while writing the workload section",
+      "run_id": "run_final"
+    }
+  ],
+  "figures": [
+    {
+      "id": "fig_no_table",
+      "title": "Rate against problem size",
+      "chart_type": "line",
+      "axes": {
+        "x": {"label": "Problem size", "unit": "items", "scale": "linear"},
+        "y": {"label": "Rate", "unit": "units/s", "scale": "linear"}
+      },
+      "note": "a curve published as a picture, with no numbers a reader can read off it"
+    },
+    {
+      "id": "fig_literals",
+      "title": "Fraction of the roof, by size",
+      "chart_type": "bar",
+      "axes": {
+        "x": {"label": "Problem size", "unit": "items", "scale": "categorical"},
+        "y": {"label": "Fraction of the roof", "unit": "percent", "scale": "linear"}
+      },
+      "table_view": {
+        "columns": ["Problem size", "Fraction of the roof"],
+        "value_ids": ["burst_rate_high_precision"],
+        "caption": "a table of typed numbers beside a chart of envelopes"
+      },
+      "reference_lines": [{"value_id": "roof_shared", "label": "Compute roof", "is_floor": false}]
+    }
+  ],
+  "version_history": [
+    {
+      "version": "1.0",
+      "date": "2026-08-26",
+      "previous_version": null,
+      "release_kind": "major",
+      "summary": "first edition of the mixed-defect fixture",
+      "measured_values_moved": false,
+      "run_provenance_changed": false
+    }
+  ],
+  "sections": [
+    {
+      "id": "document_control",
+      "title": "Document control",
+      "purpose": "say which run artefacts contributed",
+      "uses": [],
+      "cross_references": []
+    },
+    {
+      "id": "results",
+      "title": "What the work reached",
+      "purpose": "state the burst rates and the fraction of the roof",
+      "uses": ["burst_rate_high_precision", "burst_rate_reference", "roof_shared", "cap_busy_samples"],
+      "cross_references": ["thermal_headroom"]
+    },
+    {
+      "id": "workload",
+      "title": "What was submitted",
+      "purpose": "disclose the corpus and the mixture",
+      "uses": ["mixture_share_short", "throughput_weighted_mean"],
+      "cross_references": []
+    },
+    {
+      "id": "quality_gate",
+      "title": "Quality gate",
+      "purpose": "report the fixed case set",
+      "uses": ["quality_gate_result"],
+      "cross_references": []
+    },
+    {
+      "id": "reproducibility",
+      "title": "Reproducing this",
+      "purpose": "say whether a reader could run the same measurement",
+      "uses": [],
+      "cross_references": []
+    }
+  ],
+  "figures_of_merit": {
+    "primary": {
+      "value_id": "burst_rate_high_precision",
+      "why": "the burst rate is the figure the report is cited for"
+    },
+    "secondary": ["throughput_weighted_mean"]
+  },
+  "notes": ["this bundle is a template test fixture and reproduces several historical defects on purpose"],
+  "warnings": ["the instrumentation pass ran in shared mode"]
+}

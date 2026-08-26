@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: several historical defects at once</title>
+</head>
+<body>
+<main>
+
+<!--
+  One fixture, several defects, so that each rule has something of its own to find:
+
+  L1  D2: "every one of the 201 busy samples" quantifies the aggregate with a per-unit number.
+  L2  a table cell that is a typed number, an assumption with no rationale, a value stored as text,
+      and a gate whose kind demands cases it does not have.
+  L4  D8: the assumed share is labelled at its first appearance and bare at its second, and a
+      weighted mean is rendered from a mixture whose weighted_summary_permitted is not set. The
+      shared-mode roof is rendered with no bound wording.
+  L5  D6: "see section 18" typed into prose, and an authored marker for a section that does not exist.
+  L6  D5/D1: one figure with no table view at all, and one whose table view is typed numbers.
+  L8  D4: 238.4 set against 237.6, measured at different problem sizes in different runs.
+  L9  D9: "the harness and the raw data are published" while tool.published is false.
+  L11 D12: "10 of 10" with no published cases, and a cache-defeat claim with no counter readings.
+-->
+
+<section data-section="document_control">
+<h2>1. Document control</h2>
+<p>This edition is <span data-ver="version">1.0</span> of a fixture report, built by <span data-field="tool.name">probe-harness</span> at version <span data-field="tool.version">2.1.0</span>.</p>
+<table data-run-register="true">
+<thead><tr><th>Run</th><th>Window</th><th>Role</th><th>Mode</th><th>Harness</th><th>Machine</th><th>Conditions digest</th></tr></thead>
+<tbody>
+<tr data-run-id="run_final">
+<td data-field="runs.run_final.id">run_final</td>
+<td data-field="runs.run_final.window">2026-08-20 08:00 to 09:00 UTC</td>
+<td data-field="runs.run_final.role">primary sweep</td>
+<td data-field="runs.run_final.mode">exclusive</td>
+<td data-field="runs.run_final.harness_version">2.1.0</td>
+<td data-field="runs.run_final.machine_fingerprint">mf-8fd1c0</td>
+<td data-field="runs.run_final.comparability_fingerprint.hash">a91c</td>
+</tr>
+<tr data-run-id="run_instrumented">
+<td data-field="runs.run_instrumented.id">run_instrumented</td>
+<td data-field="runs.run_instrumented.window">2026-08-12 21:00 to 22:00 UTC</td>
+<td data-field="runs.run_instrumented.role">instrumentation pass</td>
+<td data-field="runs.run_instrumented.mode">shared</td>
+<td data-field="runs.run_instrumented.harness_version">2.0.0</td>
+<td data-field="runs.run_instrumented.machine_fingerprint">mf-8fd1c0</td>
+<td data-field="runs.run_instrumented.comparability_fingerprint.hash">4f02</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="results">
+<h2>2. What the work reached</h2>
+<p>The burst rate was <span data-value-id="burst_rate_high_precision">238.4 units/s</span>, unchanged from the <span data-value-id="burst_rate_reference">237.6 units/s</span> the earlier pass reported, so the machine is stable across editions.</p>
+<p>The roof it was measured against is <span data-value-id="roof_shared">290.0 units/s</span>, which is what the units reached with the work resident.</p>
+<p>The configured limit held for every one of the 201 busy samples, which is why the limit and not the roof is the thing to talk about. The thermal side of this is in see section 18.</p>
+<figure data-figure="fig_no_table">
+<svg viewBox="0 0 320 160" role="img" aria-label="rate against problem size">
+<polyline fill="none" stroke="currentColor" points="20,140 160,110 300,60"/>
+</svg>
+<figcaption><span data-fig-label="fig_no_table">Figure 1</span>. Rate against problem size.</figcaption>
+</figure>
+<figure data-figure="fig_literals">
+<svg viewBox="0 0 320 160" role="img" aria-label="fraction of the roof by size">
+<rect x="20" y="60" width="40" height="80"/><rect x="80" y="40" width="40" height="100"/>
+</svg>
+<figcaption><span data-fig-label="fig_literals">Figure 2</span>. Fraction of the roof, by size.</figcaption>
+</figure>
+<table data-figure="fig_literals">
+<thead><tr><th>Problem size</th><th>Fraction of the roof</th></tr></thead>
+<tbody>
+<tr><th>4096</th><td>82</td></tr>
+<tr><th>8192</th><td>80</td></tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="workload">
+<h2>3. What was submitted</h2>
+<p>Inputs are unique by construction, so nothing measured here was served from a cache.</p>
+<p>The mixture is weighted towards the smallest size, whose assumed share is <span data-value-id="mixture_share_short">0.35</span>.</p>
+<p>Across that mixture the rate works out at <span data-value-id="throughput_weighted_mean">83.44 units/s</span>, and the short-size share of <span data-value-id="mixture_share_short">0.35</span> is what drives it.</p>
+</section>
+
+<section data-section="quality_gate">
+<h2>4. Quality gate</h2>
+<p>The gate returned <span data-value-id="quality_gate_result">10 of 10</span>, a pass.</p>
+</section>
+
+<section data-section="reproducibility">
+<h2>5. Reproducing this</h2>
+<p>The harness and the raw data are published, so anyone can reproduce these numbers.</p>
+</section>
+
+</main>
+</body>
+</html>

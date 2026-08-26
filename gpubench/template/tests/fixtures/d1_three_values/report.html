@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: D1, one quantity printed three ways</title>
+</head>
+<body>
+<main>
+
+<!--
+  This fixture reproduces historical defect D1 exactly.
+
+  The bundle holds ONE value for the fraction of the compute roof: roof_fraction, 82 percent,
+  precision 0. The headline table renders that envelope. The prose and the recommendation each
+  spell the number out by hand instead, and each spells it out differently: 80 in the prose,
+  83 in the recommendation. Neither sentence was wrong when it was typed; they carried values
+  from before the sizes were controlled, and nothing connected them to the change.
+
+  L1 must flag both literals, name the envelope they collide with, and say that the quantity
+  now has more than one printed reading.
+
+  This report is defective in other ways too (it renders only part of its bundle, for
+  instance), so other rules fire on it as well. Each test filters the findings to the rule
+  it is proving, and RuleCoverageTests.test_every_rule_test_is_load_bearing stubs that rule
+  out to prove the assertion is carried by the rule and not by a neighbour.
+-->
+
+<section data-section="document_control">
+<h2>1. Document control</h2>
+<p>This edition is <span data-ver="version">1.1</span> of a fixture report, built by <span data-field="tool.name">probe-harness</span> at version <span data-field="tool.version">2.1.0</span>.</p>
+<table data-run-register="true">
+<thead><tr><th>Run</th><th>Window</th><th>Role</th><th>Mode</th><th>Harness</th><th>Machine</th><th>Conditions digest</th></tr></thead>
+<tbody>
+<tr data-run-id="run_primary">
+<td data-field="runs.run_primary.id">run_primary</td>
+<td data-field="runs.run_primary.window">2026-08-20 08:00 to 09:00 UTC</td>
+<td data-field="runs.run_primary.role">primary sweep</td>
+<td data-field="runs.run_primary.mode">exclusive</td>
+<td data-field="runs.run_primary.harness_version">2.1.0</td>
+<td data-field="runs.run_primary.machine_fingerprint">mf-8fd1c0</td>
+<td data-field="runs.run_primary.comparability_fingerprint.hash">c1a2</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="results">
+<h2>2. What the work reached</h2>
+<table>
+<caption>The headline table, rendered from the envelopes.</caption>
+<thead><tr><th>Quantity</th><th>Reading</th></tr></thead>
+<tbody>
+<tr><th>Sustained rate</th><td data-value-id="rate_primary">238.4 units/s</td></tr>
+<tr><th>Compute roof</th><td data-value-id="roof_compute">290.0 units/s</td></tr>
+<tr><th>Fraction of the compute roof</th><td data-value-id="roof_fraction">82 percent</td></tr>
+</tbody>
+</table>
+<p>Read together, the machine is reaching roughly 80 percent of the compute roof it was measured against, which is a good result for a stack nobody has tuned.</p>
+</section>
+
+<section data-section="quality_gate">
+<h2>3. Quality gate</h2>
+<p>The gate ran the <span data-evidence="gate_result.cases">published case set</span> and returned <span data-value-id="gate_result">2 of 2 cases passed</span>. What a pass licenses: the stack answers these fixed cases the way it did before. What it does not license: any claim about work outside this case set, and any claim about quality in general.</p>
+</section>
+
+<section data-section="reproducing">
+<h2>4. What to do about it</h2>
+<p>At 83 percent of the compute roof, a second machine buys less than tuning this one does, so the recommendation is to tune before buying.</p>
+</section>
+
+</main>
+</body>
+</html>

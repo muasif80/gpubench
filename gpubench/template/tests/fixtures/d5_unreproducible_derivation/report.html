@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: D5, a ceiling that does not reproduce from its own inputs</title>
+</head>
+<body>
+<main>
+
+<!--
+  This fixture reproduces historical defect D5, and D11 beside it.
+
+  interconnect_ceiling_large is published as 7710.0 MB/s. Its own formula, executed against its
+  own declared inputs, gives 6564.9 MB/s: a seventeen per cent gap. The cause is the step above
+  it, latency_at_size, which declares interpolation_basis "log-linear" while the figure that
+  publishes the curve declares its latency axis "linear". Latency is linear in message size, so
+  the interpolation was done in the wrong quantity. Both derivations are computed by a script
+  beside the report rather than inside the tested harness, and tool.derivations_unit_tested is
+  false, which is why nobody could review the arithmetic.
+
+  decode_attribution_weights carries one machine's geometry as a literal in its formula, so on a
+  different machine it would produce a confident wrong answer instead of an error. That is D11,
+  and requires_inputs_present is false with no rationale, which is the same failure from the
+  other side.
+
+  This report is defective in other ways too (it renders only part of its bundle, for
+  instance), so other rules fire on it as well. Each test filters the findings to the rule
+  it is proving, and RuleCoverageTests.test_every_rule_test_is_load_bearing stubs that rule
+  out to prove the assertion is carried by the rule and not by a neighbour.
+-->
+
+<section data-section="document_control">
+<h2>1. Document control</h2>
+<p>This edition is <span data-ver="version">1.1</span> of a fixture report, built by <span data-field="tool.name">probe-harness</span> at version <span data-field="tool.version">2.1.0</span>.</p>
+<table data-run-register="true">
+<thead><tr><th>Run</th><th>Window</th><th>Role</th><th>Mode</th><th>Harness</th><th>Machine</th><th>Conditions digest</th></tr></thead>
+<tbody>
+<tr data-run-id="run_primary">
+<td data-field="runs.run_primary.id">run_primary</td>
+<td data-field="runs.run_primary.window">2026-08-20 08:00 to 09:00 UTC</td>
+<td data-field="runs.run_primary.role">primary sweep</td>
+<td data-field="runs.run_primary.mode">exclusive</td>
+<td data-field="runs.run_primary.harness_version">2.1.0</td>
+<td data-field="runs.run_primary.machine_fingerprint">mf-8fd1c0</td>
+<td data-field="runs.run_primary.comparability_fingerprint.hash">c1a2</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="results">
+<h2>2. The link between the units</h2>
+<figure data-figure="fig_latency">
+<svg viewBox="0 0 320 160" role="img" aria-label="transfer latency across message size">
+<g data-series-value-id="latency_sweep"><polyline fill="none" stroke="currentColor" points="20,140 160,120 300,30"/></g>
+</svg>
+<figcaption><span data-fig-label="fig_latency">Figure 1</span>. Transfer latency across message size. The latency axis is linear.</figcaption>
+</figure>
+<table data-figure="fig_latency">
+<thead><tr><th>Message size</th><th>Latency</th></tr></thead>
+<tbody>
+<tr><th data-axis-of="latency_sweep" data-axis-key="problem_size">1048576</th><td data-value-id="latency_sweep" data-point-at="1048576">0.00047 s</td></tr>
+<tr><th data-axis-of="latency_sweep" data-axis-key="problem_size">16777216</th><td data-value-id="latency_sweep" data-point-at="16777216">0.00298 s</td></tr>
+<tr><th data-axis-of="latency_sweep" data-axis-key="problem_size">268435456</th><td data-value-id="latency_sweep" data-point-at="268435456">0.04120 s</td></tr>
+</tbody>
+</table>
+
+<h3>The derivation, with its inputs on the page</h3>
+<table>
+<thead><tr><th>Quantity</th><th>Reading</th></tr></thead>
+<tbody>
+<tr><th>Largest message size</th><td data-value-id="message_size">268435456 B</td></tr>
+<tr><th>Latency at that size</th><td data-value-id="latency_at_size">0.04120 s</td></tr>
+<tr><th>Fixed cost of a transfer</th><td data-value-id="latency_intercept">0.00031 s</td></tr>
+<tr><th>Interconnect ceiling at large messages</th><td data-value-id="interconnect_ceiling_large">7710.0 MB/s</td></tr>
+</tbody>
+</table>
+<p>The ceiling above is what the link reached at the largest message size measured.</p>
+
+<h3>Where one step of work goes</h3>
+<table>
+<thead><tr><th>Quantity</th><th>Reading</th></tr></thead>
+<tbody>
+<tr><th>Time for one step</th><td data-value-id="decode_step_time">0.00090 s</td></tr>
+<tr><th>Attributed to moving the working set</th><td data-value-id="decode_attribution_weights">0.0243 s</td></tr>
+</tbody>
+</table>
+</section>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fixture: D10, a cover that understates its own provenance</title>
+</head>
+<body>
+<main>
+
+<!--
+  This fixture reproduces historical defect D10, with D3 beside it.
+
+  The cover says everything came from a single run directory. Three run ids are actually
+  referenced by rendered values: run_primary, run_sustained, and run_20260812 - and the last of
+  those is not declared in runs[] at all. It is the run id a value was transcribed from when an
+  older artefact was re-used, which is D3's mechanism: the value kept the older run's id, and
+  nothing but this rule notices.
+
+  The register renders one row, for the primary run only, so the count of contributing runs is
+  narrative rather than data. That is precisely the sentence the template makes impossible to
+  write, because the register is generated from runs[].
+
+  This report is defective in other ways too (it renders only part of its bundle, for
+  instance), so other rules fire on it as well. Each test filters the findings to the rule
+  it is proving, and RuleCoverageTests.test_every_rule_test_is_load_bearing stubs that rule
+  out to prove the assertion is carried by the rule and not by a neighbour.
+-->
+
+<section data-section="document_control">
+<h2>1. Document control</h2>
+<p>This edition is <span data-ver="version">1.1</span> of a fixture report. Everything reported here comes from a single run directory, captured in one window on one machine, so the reader can treat every figure as belonging to the same machine state.</p>
+<table data-run-register="true">
+<thead><tr><th>Run</th><th>Window</th><th>Role</th><th>Mode</th><th>Harness</th><th>Machine</th><th>Conditions digest</th></tr></thead>
+<tbody>
+<tr data-run-id="run_primary">
+<td data-field="runs.run_primary.id">run_primary</td>
+<td data-field="runs.run_primary.window">2026-08-20 08:00 to 09:00 UTC</td>
+<td data-field="runs.run_primary.role">primary sweep</td>
+<td data-field="runs.run_primary.mode">exclusive</td>
+<td data-field="runs.run_primary.harness_version">2.1.0</td>
+<td data-field="runs.run_primary.machine_fingerprint">mf-8fd1c0</td>
+<td data-field="runs.run_primary.comparability_fingerprint.hash">c1a2</td>
+</tr>
+</tbody>
+</table>
+</section>
+
+<section data-section="results">
+<h2>2. What the work reached</h2>
+<table>
+<thead><tr><th>Quantity</th><th>Reading</th></tr></thead>
+<tbody>
+<tr><th>Sustained rate</th><td data-value-id="rate_primary">238.4 units/s</td></tr>
+<tr><th>Compute roof</th><td data-value-id="roof_compute">290.0 units/s</td></tr>
+<tr><th>Fraction of the compute roof</th><td data-value-id="roof_fraction">82 percent</td></tr>
+</tbody>
+</table>
+<p>Telemetry sat at the configured limit for <span data-value-id="cap_busy_samples">401 of 401 busy samples, aggregated across both units</span>, at a mean draw of <span data-value-id="power_sustained_mean">566.4 W</span>.</p>
+</section>
+
+<section data-section="quality_gate">
+<h2>3. Quality gate</h2>
+<p>The gate ran the <span data-evidence="gate_result.cases">published case set</span> and returned <span data-value-id="gate_result">2 of 2 cases passed</span>. What a pass licenses: the stack answers these fixed cases the way it did before. What it does not license: any claim about work outside this case set, and any claim about quality in general.</p>
+</section>
+
+</main>
+</body>
+</html>

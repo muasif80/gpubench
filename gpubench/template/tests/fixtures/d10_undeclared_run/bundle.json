@@ -1,0 +1,589 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-08-26T09:12:00Z",
+  "tool": {
+    "name": "probe-harness",
+    "version": "2.1.0",
+    "source_url": "https://example.invalid/probe-harness",
+    "published": true,
+    "derivations_unit_tested": true
+  },
+  "runs": [
+    {
+      "id": "run_primary",
+      "timestamp": "2026-08-20T08:00:00Z",
+      "finished_at": "2026-08-20T09:00:00Z",
+      "window": "2026-08-20 08:00 to 09:00 UTC",
+      "harness_version": "2.1.0",
+      "machine_fingerprint": "mf-8fd1c0",
+      "comparability_fingerprint": {
+        "hash": "c1a2",
+        "inputs": "mode=exclusive;stack=engine 1.4.0;units=2;power_state=nominal"
+      },
+      "primary": true,
+      "role": "primary sweep",
+      "produced": [
+        "roof compute",
+        "rate primary",
+        "rate sweep",
+        "gate result",
+        "roof fraction"
+      ],
+      "mode": "exclusive",
+      "artifacts": [
+        "raw/primary-sweep.json",
+        "raw/primary-cap.json"
+      ],
+      "notes": [
+        "the machine was dedicated to the measurement for the whole window"
+      ],
+      "warnings": []
+    },
+    {
+      "id": "run_sustained",
+      "timestamp": "2026-08-12T21:00:00Z",
+      "finished_at": "2026-08-12T22:00:00Z",
+      "window": "2026-08-12 21:00 to 22:00 UTC",
+      "harness_version": "2.0.0",
+      "machine_fingerprint": "mf-8fd1c0",
+      "comparability_fingerprint": {
+        "hash": "4f02",
+        "inputs": "mode=shared;stack=engine 1.3.0;units=2;power_state=capped"
+      },
+      "primary": false,
+      "role": "sustained and power pass",
+      "produced": [
+        "power sustained mean"
+      ],
+      "mode": "shared",
+      "artifacts": [
+        "raw/sustained-power.json"
+      ],
+      "warnings": [
+        "measured in shared mode: other work was resident for part of the window"
+      ]
+    }
+  ],
+  "cross_run_blends": [],
+  "system_under_test": {
+    "identity": "two-unit reference machine, fixture",
+    "units": [
+      {
+        "index": 0,
+        "model": "probe unit, model A",
+        "serial_redacted": true,
+        "attachment": {
+          "nominal": "host path, wide",
+          "negotiated": "host path, wide",
+          "upstream": "host root complex"
+        }
+      },
+      {
+        "index": 1,
+        "model": "probe unit, model A",
+        "serial_redacted": true,
+        "attachment": {
+          "nominal": "host path, wide",
+          "negotiated": "host path, narrow",
+          "upstream": "peripheral bridge"
+        }
+      }
+    ],
+    "topology": "both units attached to one host, on different upstream paths",
+    "measurement_state_note": "no other work was resident during the window"
+  },
+  "software_stack": {
+    "components": [
+      {
+        "name": "execution engine",
+        "version": "1.4.0",
+        "role": "serves the workload",
+        "source": "image digest sha256:fixture"
+      },
+      {
+        "name": "driver",
+        "version": "560.10",
+        "role": "device access",
+        "source": "distribution package"
+      }
+    ],
+    "configuration": {
+      "verbatim": "engine --units 2 --concurrency 8 --window 3600",
+      "flags": [
+        {
+          "flag": "--concurrency",
+          "value": 8,
+          "effect": "sets how many requests are in flight, which moves the rate directly",
+          "invalidates_comparison": true
+        },
+        {
+          "flag": "--window",
+          "value": 3600,
+          "effect": "length of the sustained window, which decides whether the figure is burst or sustained"
+        }
+      ]
+    }
+  },
+  "workload": {
+    "corpus_kind": "synthetic",
+    "generation": {
+      "template": "<varying head> <fixed body padded to the requested size>",
+      "filler": "a fixed body of neutral filler, padded to the requested size",
+      "uniqueness_mechanism": "the varying part sits at the HEAD of every input, so no two inputs share a cacheable prefix",
+      "seed": 20260820
+    },
+    "size_control": {
+      "requested_in": "requested items per input",
+      "counted_in": "items the engine reports having consumed",
+      "method": "the harness pads the body until the engine's own counter reaches the requested size",
+      "verification": [
+        {
+          "condition": {
+            "problem_size": 1024
+          },
+          "requested": 1024,
+          "counted": 1027,
+          "ratio": 1.0029,
+          "counter_source": "engine counter, per request"
+        },
+        {
+          "condition": {
+            "problem_size": 2048
+          },
+          "requested": 2048,
+          "counted": 2053,
+          "ratio": 1.0024,
+          "counter_source": "engine counter, per request"
+        },
+        {
+          "condition": {
+            "problem_size": 4096
+          },
+          "requested": 4096,
+          "counted": 4104,
+          "ratio": 1.002,
+          "counter_source": "engine counter, per request"
+        }
+      ],
+      "basis_for_reported_rates": "counted"
+    },
+    "uniqueness_and_cache_defeat": {
+      "policy": "every input carries a fresh varying head, so a prefix cache cannot serve a second request; the policy breaks if the head is moved to the tail",
+      "cache_counters": {
+        "source": "the engine's own cache counter, read at the start and the end of the window",
+        "queries": null,
+        "hits": null,
+        "hit_rate": null,
+        "resolved_state": "off",
+        "interpretation": "the cache resolved off for the whole window, so no rate reported here was served from it"
+      }
+    },
+    "output_size_policy": "every request was asked for a fixed output size, so output size is not a free variable behind the rates",
+    "why_this_workload": "a synthetic corpus buys exact size control and costs external comparability: nobody else runs this corpus",
+    "not_claimed": "these rates are not comparable with any named external suite, because the input distribution is ours and no suite specifies it"
+  },
+  "roofs": [
+    {
+      "id": "roof_compute",
+      "label": "Compute roof",
+      "description": "the highest rate the units reached with the work resident and nothing else running",
+      "value": 290.0,
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "harness roof pass, best of five windows, engine counter",
+      "run_id": "run_primary",
+      "roof_class": "compute",
+      "is_floor": false,
+      "binding_regime": "binds above the mid problem size, where the work no longer fits the fast path",
+      "conditions": {
+        "problem_size": 4096,
+        "concurrency": 8,
+        "duration_class": "sustained"
+      },
+      "n": 5,
+      "spread": {
+        "type": "cov",
+        "value": 0.011,
+        "scope": "within-run",
+        "n_runs": 1
+      }
+    }
+  ],
+  "measurements": [
+    {
+      "id": "rate_primary",
+      "label": "Primary sustained rate",
+      "description": "the rate the workload held for the whole sustained window",
+      "value": 238.4,
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "engine request counter over the sustained window",
+      "run_id": "run_primary",
+      "conditions": {
+        "problem_size": 4096,
+        "concurrency": 8,
+        "duration_class": "sustained"
+      },
+      "n": 300,
+      "spread": {
+        "type": "cov",
+        "value": 0.004,
+        "scope": "within-run",
+        "n_runs": 1
+      },
+      "supersedes": {
+        "version": "1.1",
+        "previous_value": 237.6,
+        "why": "the earlier edition reported the rate on the requested size basis; this edition reports it on the counted basis, which is the basis every rate in the bundle now uses"
+      }
+    },
+    {
+      "id": "rate_sweep",
+      "label": "Rate across problem size",
+      "description": "the rate at each problem size, at a lower concurrency than the headline figure",
+      "value": {
+        "varies_over": [
+          "problem_size"
+        ],
+        "points": [
+          {
+            "at": {
+              "problem_size": 1024
+            },
+            "value": 210.0,
+            "n": 100
+          },
+          {
+            "at": {
+              "problem_size": 2048
+            },
+            "value": 226.0,
+            "n": 100
+          },
+          {
+            "at": {
+              "problem_size": 4096
+            },
+            "value": 232.5,
+            "n": 100
+          }
+        ],
+        "interpolation": "none",
+        "monotonic": "increasing"
+      },
+      "unit": "units/s",
+      "precision": 1,
+      "kind": "measured",
+      "source": "engine request counter, one window per size",
+      "run_id": "run_primary",
+      "conditions": {
+        "concurrency": 4,
+        "duration_class": "sustained"
+      },
+      "n": 300,
+      "spread": {
+        "type": "cov",
+        "value": 0.006,
+        "scope": "across-conditions",
+        "n_runs": 1
+      }
+    },
+    {
+      "id": "cap_busy_samples",
+      "label": "Samples at the cap",
+      "description": "how many telemetry samples, across both units, sat at the configured limit while work was resident",
+      "value": 401,
+      "unit": "count",
+      "precision": 0,
+      "kind": "measured",
+      "source": "device telemetry, sampled while the window was busy",
+      "run_id": "run_20260812",
+      "conditions": {
+        "duration_class": "sustained"
+      },
+      "n": 401,
+      "spread_not_available": "the telemetry interface exposes the sample count only as an aggregate over the window",
+      "aggregation": {
+        "over": "units",
+        "method": "count",
+        "unit_count": 2,
+        "per_unit": [
+          {
+            "unit_index": 0,
+            "value": 201,
+            "n": 201
+          },
+          {
+            "unit_index": 1,
+            "value": 200,
+            "n": 200
+          }
+        ]
+      }
+    },
+    {
+      "id": "gate_result",
+      "label": "Quality gate result",
+      "description": "the published fixed case set and its outcome",
+      "value": 2,
+      "unit": "count",
+      "precision": 0,
+      "kind": "fixed-test-set",
+      "source": "gate runner, scored against the acceptance criterion recorded on each case",
+      "run_id": "run_primary",
+      "method": {
+        "procedure": "each case submitted through the same path as the workload, then scored by exact match against its acceptance criterion",
+        "repeats": 3,
+        "scoring": "exact match",
+        "determinism_check": "every case run three times, all readings compared"
+      },
+      "licenses": "the stack answers these fixed cases the way it did before",
+      "does_not_license": "any claim about work outside this case set, and any claim about quality in general",
+      "cases": [
+        {
+          "id": "case_head",
+          "input": "return the canonical greeting, exactly as written in the case",
+          "accept": "output equals the canonical greeting, character for character",
+          "observed": "output equalled the canonical greeting",
+          "passed": true,
+          "repeats": 3,
+          "stable_across_repeats": true
+        },
+        {
+          "id": "case_tail",
+          "input": "return the canonical greeting reversed, exactly as written in the case",
+          "accept": "output equals the reversed canonical greeting, character for character",
+          "observed": "output equalled the reversed canonical greeting",
+          "passed": true,
+          "repeats": 3,
+          "stable_across_repeats": true
+        }
+      ]
+    },
+    {
+      "id": "power_sustained_mean",
+      "label": "Mean sustained draw",
+      "description": "the mean draw over the sustained window, across both units",
+      "value": 566.4,
+      "unit": "W",
+      "precision": 1,
+      "kind": "measured",
+      "source": "device telemetry, ten samples per second over the sustained window",
+      "run_id": "run_sustained",
+      "conditions": {
+        "duration_class": "sustained"
+      },
+      "n": 36000,
+      "spread": {
+        "type": "cov",
+        "value": 0.008,
+        "scope": "within-run"
+      },
+      "aggregation": {
+        "over": "units",
+        "method": "mean",
+        "unit_count": 2,
+        "per_unit": [
+          {
+            "unit_index": 0,
+            "value": 284.1
+          },
+          {
+            "unit_index": 1,
+            "value": 282.3
+          }
+        ]
+      }
+    }
+  ],
+  "derived": [
+    {
+      "id": "roof_fraction",
+      "label": "Fraction of the compute roof",
+      "description": "how much of the measured compute roof the sustained rate reached",
+      "value": 82,
+      "unit": "percent",
+      "precision": 0,
+      "kind": "derived",
+      "source": "computed by the harness from the two envelopes named in inputs",
+      "run_id": "run_primary",
+      "inputs": [
+        "rate_primary",
+        "roof_compute"
+      ],
+      "formula": "rate_primary / roof_compute * 100",
+      "computed_by": "harness/analysis.py::roof_fraction, unit-tested against a fixture bundle",
+      "requires_inputs_present": true,
+      "conditions": {
+        "problem_size": 4096,
+        "concurrency": 8,
+        "duration_class": "sustained"
+      }
+    }
+  ],
+  "assumptions": [],
+  "figures": [
+    {
+      "id": "fig_sweep",
+      "title": "Rate across problem size, against the compute roof",
+      "chart_type": "line",
+      "axes": {
+        "x": {
+          "label": "Problem size",
+          "unit": "items",
+          "scale": "linear"
+        },
+        "y": {
+          "label": "Rate",
+          "unit": "units/s",
+          "scale": "linear"
+        }
+      },
+      "note": "the rate rises with problem size and stays under the roof at every size measured",
+      "table_view": {
+        "columns": [
+          "Problem size",
+          "Rate"
+        ],
+        "value_ids": [
+          "rate_sweep"
+        ],
+        "row_axis": "problem_size",
+        "caption": "every point drawn above, at the envelope's own precision"
+      },
+      "reference_lines": [
+        {
+          "value_id": "roof_compute",
+          "label": "Compute roof",
+          "is_floor": false
+        }
+      ]
+    }
+  ],
+  "version_history": [
+    {
+      "version": "1.1",
+      "date": "2026-08-26",
+      "previous_version": "1.0",
+      "release_kind": "major",
+      "summary": "every rate moved onto the counted basis, so the headline rate is restated with both readings",
+      "measured_values_moved": true,
+      "moved_values": [
+        {
+          "value_id": "rate_primary",
+          "from": 237.6,
+          "to": 238.4,
+          "why": "the rate is now computed on the basis the engine counts in, not the basis the harness requested in"
+        }
+      ],
+      "run_provenance_changed": false,
+      "verified_by": "a numeric diff of every rendered value against the previous edition's bundle, plus a rebuild with the run removed",
+      "defects_closed": [
+        "D1 style drift between the prose and the table"
+      ]
+    },
+    {
+      "version": "1.0",
+      "date": "2026-08-21",
+      "previous_version": null,
+      "release_kind": "major",
+      "summary": "first edition built from the template",
+      "measured_values_moved": false,
+      "run_provenance_changed": false
+    }
+  ],
+  "sections": [
+    {
+      "id": "document_control",
+      "title": "Document control",
+      "purpose": "say which run artefacts contributed and which edition the reader holds, before any result is shown",
+      "order_hint": 1,
+      "uses": [],
+      "cross_references": []
+    },
+    {
+      "id": "results",
+      "title": "What the work reached",
+      "purpose": "state the sustained rate, the roof it was measured against, and the fraction of that roof",
+      "order_hint": 2,
+      "uses": [
+        "rate_primary",
+        "roof_compute",
+        "roof_fraction",
+        "cap_busy_samples",
+        "rate_sweep",
+        "power_sustained_mean"
+      ],
+      "cross_references": [
+        "workload"
+      ]
+    },
+    {
+      "id": "workload",
+      "title": "What was submitted",
+      "purpose": "disclose the corpus, how size was controlled, and what the cache counters read",
+      "order_hint": 3,
+      "uses": [],
+      "cross_references": []
+    },
+    {
+      "id": "quality_gate",
+      "title": "Quality gate",
+      "purpose": "publish the fixed case set, its outcome, and what a pass does and does not license",
+      "order_hint": 4,
+      "uses": [
+        "gate_result"
+      ],
+      "cross_references": []
+    },
+    {
+      "id": "reproducing",
+      "title": "Reproducing this",
+      "purpose": "name the harness and the artefacts a reader would need",
+      "order_hint": 5,
+      "uses": [],
+      "cross_references": []
+    },
+    {
+      "id": "version_history",
+      "title": "Version history",
+      "purpose": "carry every edition as a walkable chain",
+      "order_hint": 6,
+      "uses": [],
+      "cross_references": []
+    }
+  ],
+  "figures_of_merit": {
+    "primary": {
+      "value_id": "rate_primary",
+      "why": "the rate the deployment is sized on, quoted for the sustained window rather than a burst"
+    },
+    "secondary": [
+      "roof_fraction"
+    ],
+    "self_assessment": [
+      {
+        "question": "does the bundle carry a latency bound for the primary figure",
+        "verdict": "no",
+        "detail": "the fixture measures rate only, so the primary figure is quoted without a service level, and a capacity claim may not be built on it"
+      }
+    ]
+  },
+  "scope": {
+    "governing_rule": "every number is either measured and labelled, or a stated derivation from labelled inputs",
+    "non_claims": [
+      "no claim is made about work outside the published case set",
+      "no claim is made about comparability with any external suite"
+    ]
+  },
+  "presentation": {
+    "rounding": "half-up",
+    "percent_precision": 0
+  },
+  "notes": [
+    "this bundle is a template test fixture and describes no real machine"
+  ],
+  "warnings": []
+}

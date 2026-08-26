@@ -1,0 +1,1632 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://benchmark-report-template/run-schema.json",
+  "title": "Benchmark run bundle",
+  "description": "The contract a run directory must satisfy before a report may be generated from it. It is domain-neutral on purpose: it describes devices under test, roofs, a workload and measured values, and it says nothing about what kind of machine is being measured. A CPU, a storage array, a network fabric and an accelerator all validate against it. Every number the report will print must appear here once, inside a value envelope, and be referenced by id from prose, tables and figures. Prose that carries its own digits is outside the contract and is the failure mode this schema exists to stop.",
+  "$comment": "WHY THIS FILE EXISTS. Three rounds of external review of the source report found twelve defects and all twelve were one failure mode: a number was written into a sentence by hand and then drifted from the value it was supposed to restate. D1 a rate quoted as 82% in a table, 80% in prose and 83% in a recommendation. D2 a cap counted over one unit in one section and both units in another. D3 a sustained figure transcribed from an older run. D4 a burst figure paired against a measurement taken at a different problem size in a different run and presented as like-for-like. D5 a ceiling nobody could reproduce because its derivation lived in a script beside the report instead of naming its inputs. D6 hard-coded section cross-references that went stale when sections were reordered. D7 a version history missing two of its own versions. D8 an assumed traffic mixture presented as measured. D9 two sections contradicting each other about whether the harness had been published. D10 a cover claiming one run directory when three artefacts contributed. D11 a derivation with one machine's constants hardcoded, so on any other machine it produced a confident wrong answer instead of an error. D12 a quality gate reported as PASS with its test cases unpublished, hence unfalsifiable. Each rule below cites the defect it prevents.",
+
+  "type": "object",
+  "required": [
+    "schema_version",
+    "runs",
+    "cross_run_blends",
+    "system_under_test",
+    "software_stack",
+    "workload",
+    "roofs",
+    "measurements",
+    "derived",
+    "assumptions",
+    "figures",
+    "version_history"
+  ],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^x_": {
+      "$comment": "Escape hatch for domain-specific extensions. Anything under an x_ prefix is carried through untouched and is never read by the template's own logic, so a domain can extend the bundle without forking the schema. Constraint B-C2: nothing under x_ may be required by the template, because the template must stay free of any one domain's vocabulary."
+    }
+  },
+
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "description": "Version of THIS schema the bundle was written against. A generator must refuse to render a bundle whose major version it does not know, rather than silently ignoring fields it cannot interpret."
+    },
+
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the bundle was assembled from the raw probe output. Distinct from any run timestamp: assembly can happen long after measurement, and the difference is itself provenance."
+    },
+
+    "tool": {
+      "type": "object",
+      "description": "The harness that produced the raw data. Recorded because the harness is part of the measurement, not documentation about it: a different harness measuring the same machine is a different measurement.",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "source_url": {
+          "type": "string",
+          "description": "Where the harness can be obtained. Empty or absent means the run is not independently reproducible, and the report must say so in exactly one place. D9: one section claimed the harness and raw data were published while another said nobody outside had run it. Publication status is a field, not a sentence each section writes for itself."
+        },
+        "published": {
+          "type": "boolean",
+          "description": "Whether the harness is actually obtainable by a reader right now. D9. Every sentence about reproducibility must be generated from this flag."
+        },
+        "derivations_unit_tested": {
+          "type": "boolean",
+          "description": "Whether the derivations in derived[] are computed by tested code inside the harness rather than by an ad-hoc script beside the report. D5: the unreproducible interconnect ceiling came from a script nobody could see, which interpolated latency log-linearly where latency is linear in message size."
+        }
+      },
+      "additionalProperties": true
+    },
+
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every run artefact that contributes any value to the report. D10: the cover claimed a single run directory while three artefacts contributed. Multi-run provenance is structural here, not a sentence someone remembers to write, because every envelope carries a run_id that must resolve to one of these entries.",
+      "contains": {
+        "type": "object",
+        "properties": { "primary": { "const": true } },
+        "required": ["primary"]
+      },
+      "minContains": 1,
+      "maxContains": 1,
+      "$comment": "Exactly one run must be primary. The primary run is the one every headline figure must come from; anything sourced elsewhere has to be named as such at the point of use.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "timestamp",
+          "harness_version",
+          "machine_fingerprint",
+          "comparability_fingerprint",
+          "primary",
+          "role",
+          "produced"
+        ],
+        "additionalProperties": true,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/identifier",
+            "description": "Stable id referenced by every envelope's run_id."
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Start of the run, in UTC. Two values from windows that do not overlap were measured on a machine in two different states."
+          },
+          "finished_at": { "type": "string", "format": "date-time" },
+          "window": {
+            "type": "string",
+            "description": "Human-readable measurement window, for the run register the report prints. Generated from timestamp and finished_at where both exist."
+          },
+          "harness_version": {
+            "type": "string",
+            "description": "Version of the harness for THIS run. Two runs from different harness versions are not automatically comparable even on the same machine."
+          },
+          "machine_fingerprint": {
+            "type": "string",
+            "description": "Identity of the machine: what it is. Changes when the hardware changes."
+          },
+          "comparability_fingerprint": {
+            "type": "object",
+            "description": "Identity of the measurement CONDITIONS: whether two runs may be compared at all. Deliberately separate from machine_fingerprint, because the same machine in shared mode and in exclusive mode yields values that must not be pooled. D4 was a cross-condition comparison presented as like-for-like; a differing fingerprint is what makes that mechanically detectable.",
+            "required": ["hash", "inputs"],
+            "properties": {
+              "hash": {
+                "type": "string",
+                "description": "Short digest printed in the report so a reader can tell two runs apart at a glance."
+              },
+              "inputs": {
+                "type": "string",
+                "description": "The exact string that was hashed, published verbatim. A hash whose input string is secret is decoration; a reader must be able to recompute it."
+              }
+            },
+            "additionalProperties": true
+          },
+          "primary": {
+            "type": "boolean",
+            "description": "True for the one run that every headline figure comes from. All other runs are supporting, and any value taken from them must be visibly attributed at the point of use."
+          },
+          "role": {
+            "type": "string",
+            "description": "What this run was for, in one phrase (for example: primary sweep, instrumentation pass, sustained/power pass). Printed as a row of the run register."
+          },
+          "produced": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" },
+            "description": "What this run and only this run produced. If a run produced nothing that is used, it does not belong in runs[] at all. This list is what makes the D10 rebuild test possible: remove a run, and the values that vanish must be exactly these."
+          },
+          "mode": {
+            "$ref": "#/$defs/mode",
+            "description": "Default mode for values from this run. An envelope may override it, and a mismatch between the two is a lint error rather than a footnote."
+          },
+          "artifacts": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Paths or identities of the raw files this run left behind, so the bundle can be re-derived from source rather than trusted."
+          },
+          "notes": { "type": "array", "items": { "type": "string" } },
+          "warnings": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Conditions the harness itself flagged, such as running in shared mode. A warning here must surface in the report; suppressing it is how a floor gets printed as a ceiling."
+          }
+        }
+      }
+    },
+
+    "cross_run_blends": {
+      "type": "array",
+      "description": "Every table, figure or claim that deliberately mixes values from more than one run, declared up front. Required even when empty, so the author has to state 'none' rather than leave the question unasked. D10: the report had two tables blending runs and no structural place to say so.",
+      "items": {
+        "type": "object",
+        "required": ["target", "run_ids", "why_permissible"],
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "type": "string",
+            "description": "The figure id, table id or section id that blends runs."
+          },
+          "run_ids": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "$ref": "#/$defs/identifier" }
+          },
+          "why_permissible": {
+            "type": "string",
+            "description": "Why mixing these runs does not invalidate the comparison. If the answer is a comparability_fingerprint match on the axes that matter, say which axes."
+          },
+          "disclosed_in_place": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether the blend is stated at the point of use and not only in the provenance section. A blend disclosed only in an appendix is how D4 survived two review rounds."
+          }
+        }
+      }
+    },
+
+    "system_under_test": {
+      "$ref": "#/$defs/system_under_test"
+    },
+
+    "software_stack": {
+      "$ref": "#/$defs/software_stack"
+    },
+
+    "workload": {
+      "$ref": "#/$defs/workload"
+    },
+
+    "roofs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The ceilings the workload is measured against. Each roof is a full value envelope plus the extra fields a ceiling needs: which class of ceiling it is, and whether it is a true ceiling or a floor standing in for one.",
+      "items": { "$ref": "#/$defs/roof" }
+    },
+
+    "measurements": {
+      "type": "array",
+      "description": "Values obtained directly rather than computed: measured, enumerated, published (vendor reference), supplied (by an owner or operator) and fixed-test-set. Nothing in here may depend on another value in the bundle; if it does, it belongs in derived[].",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/envelope" },
+          {
+            "properties": {
+              "kind": {
+                "enum": ["measured", "enumerated", "published", "supplied", "fixed-test-set"]
+              }
+            }
+          }
+        ]
+      }
+    },
+
+    "derived": {
+      "type": "array",
+      "description": "Values computed from other values. Every entry must name its inputs and print its formula, so a reader with a calculator can rebuild it. D5: an interconnect ceiling was unreproducible from the published curve because its derivation was invisible; the inputs and formula requirements make that structurally impossible.",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/envelope" },
+          { "properties": { "kind": { "const": "derived" } }, "required": ["kind"] }
+        ]
+      }
+    },
+
+    "assumptions": {
+      "type": "array",
+      "description": "Values that were chosen rather than measured, plus projections beyond the measured envelope. Listed as their own top-level array so a reader can discount every conclusion that rests on them without reverse-engineering which ones do. D8: a traffic mixture was presented as if measured; here it can only be expressed as kind assumption, with a rationale.",
+      "items": {
+        "allOf": [
+          { "$ref": "#/$defs/envelope" },
+          {
+            "properties": { "kind": { "enum": ["assumption", "projection"] } },
+            "required": ["kind"]
+          }
+        ]
+      }
+    },
+
+    "figures": {
+      "type": "array",
+      "description": "Every chart in the report. A figure without a table view is an unfalsifiable picture, so the table view is required and must reference envelope ids rather than restating numbers. This makes the reproducibility contract structural instead of a promise on the cover.",
+      "items": { "$ref": "#/$defs/figure" }
+    },
+
+    "version_history": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every edition of the report, newest first. D7: a published version history was missing two of its own versions and listed them out of order. Each entry names the version it follows, so the chain is checkable rather than a list someone maintains by hand.",
+      "items": { "$ref": "#/$defs/version_history_entry" }
+    },
+
+    "sections": {
+      "type": "array",
+      "description": "Optional declared section inventory. Present so cross-references can be made by section id and resolved to whatever number the section ends up with after reordering. D6: hard-coded 'see section 18' references went stale when sections were reordered. A section number must never appear in authored text.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "purpose"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "title": { "type": "string" },
+          "purpose": {
+            "type": "string",
+            "description": "One sentence on what the section is for. Sections that cannot state a purpose are usually two sections."
+          },
+          "order_hint": {
+            "type": "integer",
+            "description": "Preferred position. Advisory only: the renderer assigns final numbers, and nothing may depend on this value."
+          },
+          "uses": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/identifier" },
+            "description": "Envelope ids this section prints. A lint pass can then check that every number rendered in the section resolves to one of these, which is the check that catches D1."
+          },
+          "cross_references": {
+            "type": "array",
+            "items": { "$ref": "#/$defs/identifier" },
+            "description": "Other section ids referenced. Ids only, never numbers. D6."
+          }
+        }
+      }
+    },
+
+    "figures_of_merit": {
+      "type": "object",
+      "description": "Optional. The one quantity the benchmark ranks on, its latency bound, and the secondary and efficiency figures. Declared so the report cannot quietly change what it is optimising between sections.",
+      "required": ["primary"],
+      "additionalProperties": false,
+      "properties": {
+        "primary": {
+          "type": "object",
+          "required": ["value_id", "why"],
+          "additionalProperties": false,
+          "properties": {
+            "value_id": { "$ref": "#/$defs/identifier" },
+            "why": { "type": "string" },
+            "bound_by": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/identifier" },
+              "description": "The latency or quality bound the primary figure is only valid under. A throughput figure quoted without its bound is not a figure of merit, it is a number."
+            }
+          }
+        },
+        "secondary": { "type": "array", "items": { "$ref": "#/$defs/identifier" } },
+        "efficiency": { "type": "array", "items": { "$ref": "#/$defs/identifier" } },
+        "self_assessment": {
+          "type": "array",
+          "description": "The report's own grading of its choice of figures, including the figures it admits it does not have. An honest gap listed here is worth more than a metric invented to fill it.",
+          "items": {
+            "type": "object",
+            "required": ["question", "verdict"],
+            "properties": {
+              "question": { "type": "string" },
+              "verdict": { "type": "string" },
+              "detail": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+
+    "scope": {
+      "type": "object",
+      "description": "Optional. What the report borrows from established methodologies and, for each, the claim it explicitly does not make. Keeping the non-claims next to the borrowings stops a borrowed vocabulary from being read as a conformance claim.",
+      "additionalProperties": false,
+      "properties": {
+        "governing_rule": {
+          "type": "string",
+          "description": "The one rule the report holds itself to. In the source report: every number is either measured and labelled, or a stated derivation from labelled inputs."
+        },
+        "borrowed_frameworks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "borrowed", "not_claimed"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": "string" },
+              "borrowed": { "type": "string" },
+              "not_claimed": {
+                "type": "string",
+                "description": "The conformance claim NOT being made. Required, because borrowing a method's vocabulary without this line reads as certification."
+              }
+            }
+          }
+        },
+        "non_claims": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Standalone statements of what the report does not establish."
+        }
+      }
+    },
+
+    "cost_model": {
+      "type": "object",
+      "description": "Optional. Turns supplied capital, assumed tariffs and measured throughput into a cost per unit of work. Every input must be an envelope id whose kind is supplied or assumption, so the reader can see which half of the number is a choice.",
+      "required": ["input_ids", "exclusions"],
+      "additionalProperties": false,
+      "properties": {
+        "input_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "exclusions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "What the cost figure leaves out. Required and non-empty: a cost per unit with no exclusions list is always wrong, because something is always excluded."
+        },
+        "scenario_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "Derived cost values, one per scenario (for example per duty cycle). Each must be a derived envelope naming these inputs."
+        }
+      }
+    },
+
+    "presentation": {
+      "type": "object",
+      "description": "Optional rendering contract. Rounding lives here and nowhere else: D1 and D3 were both rounding-and-restating drift, and a single rounding rule applied at render time to a single stored value cannot drift from itself.",
+      "additionalProperties": false,
+      "properties": {
+        "rounding": { "enum": ["half-up", "half-even", "truncate"], "default": "half-up" },
+        "thousands_separator": { "type": "string" },
+        "percent_precision": { "type": "integer", "minimum": 0, "maximum": 6 },
+        "range_separator": { "type": "string" }
+      }
+    },
+
+    "notes": { "type": "array", "items": { "type": "string" } },
+
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Bundle-level conditions that must reach the reader, such as roofs measured in shared mode. A warning present here and absent from the rendered report is a lint failure."
+    }
+  },
+
+  "$defs": {
+
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "minLength": 2,
+      "maxLength": 96,
+      "description": "Lower snake_case id. Ids must be unique across runs[], roofs[], measurements[], derived[], assumptions[] and figures[] taken together; JSON Schema cannot express cross-array uniqueness, so the lint pass enforces it. A duplicated id is how two different values come to be printed under one name."
+    },
+
+    "mode": {
+      "enum": ["exclusive", "shared"],
+      "description": "Whether the machine was dedicated to the measurement (exclusive) or measured while other work was resident (shared). THIS IS NOT A FOOTNOTE. A roof measured in shared mode is a FLOOR, not a ceiling: the true ceiling is at least that high and unknown. Every percentage computed against a shared-mode roof therefore inherits that: the real fraction of the true ceiling is LOWER than the number printed, so such a percentage is an upper bound on achievement and must be rendered with that word. Any derived value whose inputs include a shared-mode roof must set inherits_floor true, and the renderer must qualify it. Reporting a shared-mode fraction as if the denominator were a ceiling is the same class of error as D4: a value presented under conditions other than the ones it was taken under."
+    },
+
+    "unit": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unit of the value, as it will be printed. Dimensionless quantities take an explicit unit too: use 'ratio', 'fraction', 'percent', 'count' or '1'. There is no such thing as a unitless number in a report; there is only a number whose unit the reader has to guess. Keep units domain-neutral wherever a neutral form exists (constraint B-C2)."
+    },
+
+    "conditions": {
+      "type": "object",
+      "description": "The state that must match before two values may be compared. D4: a burst figure was paired with a figure measured at a DIFFERENT problem size in a different run, and presented as like-for-like. With conditions attached to both, that comparison is mechanically detectable instead of depending on a reviewer noticing. Deliberately an OPEN object, because what makes two measurements comparable is domain-specific; the keys below are conventions the template understands and will compare automatically. Unknown keys are compared for equality too, so adding a key makes the comparison stricter, never looser.",
+      "additionalProperties": true,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "properties": {
+        "problem_size": {
+          "description": "The size of the thing being worked on, in whatever the domain's natural unit is: a matrix dimension, a message length, a block size, a record count. D4: whenever two values differ here they are not comparable, however similar they look.",
+          "type": ["number", "string", "integer"]
+        },
+        "work_unit_count": {
+          "description": "How much work the single measurement covered, where that is separate from problem size.",
+          "type": ["number", "integer"]
+        },
+        "concurrency": {
+          "description": "Number of simultaneous in-flight requests, streams, threads or queue depth. Throughput is meaningless without it.",
+          "type": ["integer", "number"]
+        },
+        "batch_size": { "type": ["integer", "number"] },
+        "precision": {
+          "type": "string",
+          "description": "Numeric format or fidelity level of the work, where the domain has one. Neutral name on purpose: 'precision' fits arithmetic formats, compression levels and sampling fidelity alike."
+        },
+        "mode": { "$ref": "#/$defs/mode" },
+        "duration_class": {
+          "enum": ["burst", "sustained", "steady-state", "cold", "warm"],
+          "description": "A burst figure and a sustained figure are different measurements of the same machine. D4 pairing one against the other without saying so is the exact defect. D3, a sustained value transcribed from an older run, is caught by run_id; this key catches the other half."
+        },
+        "unit_index": {
+          "description": "Which device or unit the value came from, when it came from one. Absent means the value is not per-unit, and aggregation must then say what it covers. D2.",
+          "type": ["integer", "string"]
+        },
+        "parallelism": {
+          "type": ["integer", "string"],
+          "description": "How the work was split across units, where that is a configurable."
+        },
+        "service_level": {
+          "type": "string",
+          "description": "The latency or quality bound the value is quoted under, such as a percentile ceiling. A throughput figure quoted at a different bound is a different figure."
+        },
+        "percentile": {
+          "type": ["number", "string"],
+          "description": "Which percentile of a distribution this value is. A p50 and a p95 are never interchangeable."
+        },
+        "power_state": {
+          "type": "string",
+          "description": "Thermal, clock or power-limit state at the time of measurement, where the domain has one. A value taken while the unit was limited is a different value from one taken while it was not."
+        },
+        "workload_id": {
+          "$ref": "#/$defs/identifier",
+          "description": "Which declared workload profile produced the value, when a bundle carries more than one."
+        }
+      }
+    },
+
+    "spread": {
+      "type": "object",
+      "description": "How much the value moved. A mean with no spread invites a reader to treat noise as signal, and it is what makes a between-edition difference look like a finding. The reproducibility threshold the report quotes must be derived from these, not asserted.",
+      "required": ["type", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": ["cov", "stdev", "range", "ci95", "iqr", "percentiles", "min_max"],
+          "description": "cov is the coefficient of variation as a fraction, not a percentage. Store the fraction and let presentation render the percent; storing both is how 0.4% and 0.004 come to disagree."
+        },
+        "value": {
+          "description": "The spread itself. A number for cov, stdev, ci95 and iqr; an object for percentiles and min_max.",
+          "type": ["number", "object", "array"]
+        },
+        "n_runs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of independent RUNS the spread is across, where that differs from n samples within one run. Between-run and within-run variance are different quantities and a report that quotes one as the other cannot state a real reproducibility threshold."
+        },
+        "scope": {
+          "enum": ["within-run", "between-run", "across-units", "across-conditions"],
+          "description": "What the spread is over. D2 in miniature: a spread across units and a spread across samples are not the same number."
+        }
+      }
+    },
+
+    "value_scalar": {
+      "type": ["number", "string", "boolean"],
+      "description": "A single value. Strings are for genuinely non-numeric facts (a link generation, an engine count, a verdict); a number stored as a string is a lint error, because it cannot be rounded, compared or checked."
+    },
+
+    "value_range": {
+      "type": "object",
+      "description": "A value that is a range ACROSS a condition rather than a scalar. Required by the source report in several places: a fraction-of-ceiling that spans a set of problem sizes, for example. Storing such a thing as a scalar forces the author to pick an end, and picking a different end in a different section is D1 exactly.",
+      "required": ["min", "max", "across"],
+      "additionalProperties": false,
+      "properties": {
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "across": {
+          "type": "object",
+          "description": "Which condition the range spans, and over what span. A range whose axis is unnamed cannot be compared with anything.",
+          "required": ["condition"],
+          "additionalProperties": false,
+          "properties": {
+            "condition": {
+              "type": "string",
+              "description": "Name of the condition key that varies, using the conventional keys in conditions where one applies."
+            },
+            "from": { "type": ["number", "string"] },
+            "to": { "type": ["number", "string"] },
+            "values": {
+              "type": "array",
+              "items": { "type": ["number", "string"] },
+              "description": "The discrete condition values covered, when the axis is not continuous."
+            }
+          }
+        },
+        "min_at": {
+          "type": ["number", "string"],
+          "description": "The condition value at which the minimum occurred. Without it, a reader cannot tell whether the low end is the small case or the large one."
+        },
+        "max_at": { "type": ["number", "string"] }
+      }
+    },
+
+    "value_series": {
+      "type": "object",
+      "description": "A curve or grid: one value per condition point, in one envelope. The source report needs this for a message-size sweep, a concurrency sweep, a per-length prefill table and a two-axis batch-by-concurrency grid. Holding a sweep as one envelope rather than nine loose scalars is what lets a figure and a table be generated from the same object, which is why a figure can never disagree with its own table view.",
+      "required": ["points"],
+      "additionalProperties": false,
+      "properties": {
+        "varies_over": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Which condition keys vary across the points. One entry for a curve, two for a grid. Declared so a lint pass can check that every point actually varies only on these axes; a point that also moved some other condition is a hidden cross-condition comparison, D4."
+        },
+        "points": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["at", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "$ref": "#/$defs/conditions",
+                "description": "The condition values for this point. Merged over the envelope's own conditions, which hold everything that did NOT vary."
+              },
+              "value": { "type": ["number", "string", "boolean", "null"] },
+              "n": { "type": "integer", "minimum": 1 },
+              "spread": { "$ref": "#/$defs/spread" },
+              "note": { "type": "string" },
+              "excluded": {
+                "type": "boolean",
+                "description": "Point measured but excluded from any fit or headline. Keeping it visible and flagged is honest; deleting it is not."
+              },
+              "exclusion_reason": { "type": "string" }
+            }
+          }
+        },
+        "interpolation": {
+          "type": "string",
+          "description": "How a value BETWEEN points may legitimately be obtained, if at all. D5 is precisely this field's absence: a ceiling was derived by interpolating latency log-linearly when latency is linear in message size, and the error was invisible because the rule was never written down. State the quantity that varies smoothly and interpolate in that one. 'none' is a valid and often correct answer."
+        },
+        "monotonic": {
+          "enum": ["increasing", "decreasing", "non-monotonic", "unknown"],
+          "description": "Advisory shape of the curve, so a renderer can flag a point that breaks the trend instead of drawing it silently."
+        }
+      }
+    },
+
+    "envelope": {
+      "type": "object",
+      "description": "THE VALUE ENVELOPE. The central idea of the whole template: every number in the system is an envelope, never a bare scalar. An envelope knows what it is, what produced it, which run it came from, under what conditions, and how much it moved. Prose, tables and figures reference it by id and never restate its digits. All twelve historical defects were bare scalars copied into sentences; this object is the thing that makes that impossible, because there is nowhere else for a number to live.",
+      "required": ["id", "value", "unit", "kind", "source", "run_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+
+        "value": {
+          "description": "The value itself: a scalar, a range across a condition, or a series of points. One place, one representation. Nothing may hold a second copy of it.",
+          "oneOf": [
+            { "$ref": "#/$defs/value_scalar" },
+            { "$ref": "#/$defs/value_range" },
+            { "$ref": "#/$defs/value_series" }
+          ]
+        },
+
+        "unit": { "$ref": "#/$defs/unit" },
+
+        "kind": {
+          "description": "Where the value came from, as a CLOSED enum. Closed on purpose: an open vocabulary lets an assumption be labelled something that sounds measured, which is D8. measured = observed by an instrument in a run. derived = computed from other values in this bundle. assumption = chosen, not observed. projection = a value outside the measured envelope, obtained by extending it. supplied = given by an owner or operator and not verifiable here. published = a third-party or vendor figure. enumerated = a countable fact read off the system rather than exercised. fixed-test-set = the result of a named, fully published set of cases.",
+          "enum": [
+            "measured",
+            "derived",
+            "assumption",
+            "projection",
+            "supplied",
+            "published",
+            "enumerated",
+            "fixed-test-set"
+          ]
+        },
+
+        "source": {
+          "type": "string",
+          "minLength": 3,
+          "description": "The instrument, counter, log or document the value came from, specifically enough that someone could go and read it again. 'the benchmark' is not a source; 'device telemetry, 10 Hz sampling over the sustained run' is."
+        },
+
+        "run_id": {
+          "$ref": "#/$defs/identifier",
+          "description": "MANDATORY ON EVERY ENVELOPE, with no exception for published or assumed values, which take the id of the run whose report they appear in. This is what makes multi-run provenance structural rather than a sentence someone remembers to write. D10: the cover claimed one run directory while three artefacts contributed, and there was no field in which that could have been noticed. D3: a sustained value transcribed from an older run would have carried the older run's id and failed the check."
+        },
+
+        "conditions": {
+          "$ref": "#/$defs/conditions",
+          "description": "Required for measured, derived and projection values. See the conditions definition for why. D4."
+        },
+
+        "mode": {
+          "$ref": "#/$defs/mode",
+          "description": "Defaults to the run's mode. Stated per envelope because a bundle can legitimately mix a shared-mode sweep with an exclusive-mode roof pass, and the mix is exactly what a reader needs to see."
+        },
+
+        "n": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of samples behind the value. Required for measured values, where 1 is a legitimate and informative answer. A mean over an unstated number of samples cannot be argued with."
+        },
+
+        "spread": { "$ref": "#/$defs/spread" },
+
+        "spread_not_available": {
+          "type": "string",
+          "description": "Why a multi-sample value carries no spread. Present so an instrument that genuinely reports only an aggregate does not block a build, while still forcing the gap to be visible. Empty or missing where n > 1 and spread is absent is a lint error."
+        },
+
+        "precision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 12,
+          "description": "Decimal places for rendering. Required for numeric values. This is the single anti-drift mechanism for D1 and D3: one stored value, one rounding rule, rendered identically everywhere it appears. 82 in a table and 80 in prose cannot happen when both come from the same envelope at the same precision."
+        },
+
+        "label": {
+          "type": "string",
+          "description": "Short human name for the value, used in tables and figure legends. Prose refers to the envelope by id and lets the renderer substitute; it never spells out the number."
+        },
+
+        "description": {
+          "type": "string",
+          "description": "What the value means, for a reader who has not read the methodology."
+        },
+
+        "aggregation": {
+          "type": "object",
+          "description": "What the value covers when it covers more than one unit, sample window or condition. D2 IS THIS FIELD'S ABSENCE: a power cap was reported as 'every one of the 201 busy samples' in one section and '399 of 401' in another, because prose counted one unit and the data held two. An envelope that says over what it aggregates cannot be restated at the wrong scope.",
+          "required": ["over", "method"],
+          "additionalProperties": false,
+          "properties": {
+            "over": {
+              "enum": ["none", "samples", "units", "conditions", "runs", "requests"],
+              "description": "The axis collapsed to produce this value. 'none' means a single unit, single window value, and must then be paired with a unit_index in conditions."
+            },
+            "method": {
+              "enum": ["mean", "median", "sum", "min", "max", "worst-case", "union", "count", "per-unit"],
+              "description": "How the axis was collapsed. Note that a sum over units and a mean over units differ by a factor of the unit count, which is the arithmetic behind D2."
+            },
+            "unit_count": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "How many units the aggregate covers. Required in practice whenever over = units; a total whose divisor is unstated is unreadable."
+            },
+            "per_unit": {
+              "type": "array",
+              "description": "The individual per-unit values behind the aggregate, kept so that a section wanting to talk about one unit takes it from here rather than re-deriving it. D2.",
+              "items": {
+                "type": "object",
+                "required": ["unit_index", "value"],
+                "additionalProperties": false,
+                "properties": {
+                  "unit_index": { "type": ["integer", "string"] },
+                  "value": { "type": ["number", "string", "boolean"] },
+                  "n": { "type": "integer", "minimum": 1 },
+                  "note": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+
+        "inputs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "minItems": 1,
+          "description": "Ids of the values this one was computed from. Required for kind derived. A derived value that cannot name its inputs is invalid, full stop. D5."
+        },
+
+        "formula": {
+          "type": "string",
+          "minLength": 3,
+          "description": "The arithmetic, written so a reader can execute it with a calculator against the values in inputs. Required for kind derived. Name the inputs by id inside the expression. D5: the defect was not a wrong formula, it was an unpublished one; a wrong formula in the open gets caught on first reading."
+        },
+
+        "computed_by": {
+          "type": "string",
+          "description": "Where the code that computes this lives, ideally inside the tested harness rather than a script beside the report. D5 again: derivations parked next to the report are not reviewed and not tested."
+        },
+
+        "requires_inputs_present": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the derivation must FAIL when an input is missing, rather than falling back to a constant. D11: a derivation carried one machine's geometry as hardcoded defaults, so on a different machine it produced a confident wrong answer instead of an error. Default true, and a false here needs a rationale."
+        },
+
+        "inherits_floor": {
+          "type": "boolean",
+          "description": "True when any input was measured in shared mode, making this value a bound rather than a point. A percentage of a shared-mode roof is an UPPER bound on achievement: the true roof is at least as high, so the true fraction is at most this. The renderer must qualify every such value, and computing it from a floor while calling it a fraction of the ceiling is a reporting error, not a rounding one."
+        },
+
+        "rationale": {
+          "type": "string",
+          "minLength": 3,
+          "description": "Why this value was chosen, and what would change if it were wrong. Required for kind assumption and kind projection. D8: an assumed traffic mixture was presented as if measured; an assumption that must argue for itself in print cannot pass as an observation."
+        },
+
+        "illustrative_only": {
+          "type": "boolean",
+          "description": "True for a figure included to show the shape of a relationship, not to be cited. A duty-cycle multiplier is the classic case. The renderer must mark it in place, since a number is cited from wherever it is read."
+        },
+
+        "provenance": {
+          "type": "object",
+          "description": "Required for kind published. Where the third-party figure came from AND how it was unpacked into the quantity being compared. The second half matters more than the first: vendor headline figures routinely quote a best case under conditions the comparison does not share, for example a rate that assumes structured sparsity and must be halved before it can be set beside a dense measurement. An unpacking chain that is not printed is a comparison a reader cannot check.",
+          "required": ["citation", "unpacking"],
+          "additionalProperties": false,
+          "properties": {
+            "citation": {
+              "type": "string",
+              "description": "The document, page or product page the headline figure came from."
+            },
+            "headline_value": {
+              "type": ["number", "string"],
+              "description": "The figure as published, before unpacking, so both ends of the chain are visible."
+            },
+            "headline_unit": { "type": "string" },
+            "unpacking": {
+              "type": "string",
+              "minLength": 3,
+              "description": "Every step from the headline figure to the value in this envelope, with the reason for each step. 'as published' is a valid unpacking for a figure used directly."
+            },
+            "vendor_conditions": {
+              "type": "string",
+              "description": "The conditions the vendor's figure was obtained under, where stated. Where not stated, say that: an unstated condition is a real limit on the comparison."
+            },
+            "comparable_to_measured": {
+              "type": "boolean",
+              "description": "Whether this unpacked figure may legitimately be set beside the measured value at all. False is common and useful: some published rates have no measurable counterpart on the available runtime, and saying so is better than printing a shortfall that is an artefact of the comparison."
+            }
+          }
+        },
+
+        "supplied_by": {
+          "type": "string",
+          "description": "Who provided the value, for kind supplied. Required for that kind. A supplied value is an input to the report, not a finding of it, and the reader needs to know whose number they are being asked to trust."
+        },
+
+        "why_not_measured": {
+          "type": "string",
+          "minLength": 3,
+          "description": "Required for kind enumerated. Why the capability or quantity was counted rather than exercised, and what it would take to measure it. An enumerated fact with no explanation reads as a measurement, which is a quiet overstatement of coverage."
+        },
+
+        "how_to_close": {
+          "type": "string",
+          "description": "What instrument or run would turn an enumerated or projected value into a measured one. Turns a gap into a work item."
+        },
+
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Required for kind fixed-test-set: the test set published IN FULL, every case, in the bundle. D12: a quality gate was reported as '10 of 10, PASS' with its cases unpublished, so the claim was unfalsifiable and a reader could neither reproduce it nor object to it. A gate whose cases are secret is a claim about the author, not the machine.",
+          "items": {
+            "type": "object",
+            "required": ["id", "input", "accept"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "input": {
+                "type": "string",
+                "description": "The case as submitted, verbatim."
+              },
+              "accept": {
+                "type": "string",
+                "description": "The acceptance criterion, precisely enough to re-apply: a pattern, an exact expected output, or a stated tolerance."
+              },
+              "observed": { "type": "string" },
+              "passed": { "type": "boolean" },
+              "repeats": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "How many times the case was run, where repeat-stability is part of what the gate checks."
+              },
+              "stable_across_repeats": { "type": "boolean" }
+            }
+          }
+        },
+
+        "method": {
+          "type": "object",
+          "description": "For a fixed-test-set: how the set was run and scored. Separate from cases so the procedure is auditable independently of the content.",
+          "additionalProperties": true,
+          "properties": {
+            "procedure": { "type": "string" },
+            "repeats": { "type": "integer", "minimum": 1 },
+            "scoring": { "type": "string" },
+            "determinism_check": { "type": "string" }
+          }
+        },
+
+        "licenses": {
+          "type": "string",
+          "description": "For a fixed-test-set: what a pass entitles the reader to conclude. Required for that kind, and deliberately narrow: a regression gate licenses 'the stack is not broken', never 'the system is accurate'."
+        },
+
+        "does_not_license": {
+          "type": "string",
+          "description": "For a fixed-test-set: what a pass does NOT entitle the reader to conclude. Required for that kind. The gap between these two lines is where an overstated quality claim would otherwise live. D12."
+        },
+
+        "preregistered_bar": {
+          "type": "object",
+          "description": "A threshold fixed BEFORE the value was known, with the date it was fixed. This is what separates a closure criterion from a rationalisation: a residual declared acceptable after seeing it is not a finding. Used for attribution residuals and reproducibility thresholds.",
+          "required": ["comparator", "threshold", "set_before_measurement"],
+          "additionalProperties": false,
+          "properties": {
+            "comparator": { "enum": ["<", "<=", ">", ">=", "==", "!="] },
+            "threshold": { "type": "number" },
+            "set_before_measurement": {
+              "type": "boolean",
+              "description": "Must be true for the bar to be cited as a pre-set bar. False means it is a post-hoc observation and must be described as one."
+            },
+            "set_on": { "type": "string", "format": "date" },
+            "outcome": { "enum": ["met", "not-met", "not-evaluated"] }
+          }
+        },
+
+        "not_comparable_with": {
+          "type": "array",
+          "description": "Values this one must NOT be set beside, and why. The source report needs this for a weight-only quantised rate that a reader would naturally compare against a dense published figure. Recording the prohibition next to the value is more durable than a caveat in a paragraph someone may not reach. D4.",
+          "items": {
+            "type": "object",
+            "required": ["id", "why"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "why": { "type": "string" }
+            }
+          }
+        },
+
+        "comparable_with": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "Values this one is explicitly like-for-like with, because their comparability-relevant conditions match. A lint pass verifies the claim against conditions rather than trusting it."
+        },
+
+        "supersedes": {
+          "type": "object",
+          "description": "The value from an earlier edition that this one replaces, when a number moved. Makes the version history's 'a measured value moved' flag checkable against the values themselves instead of against the author's memory. D7.",
+          "required": ["version", "previous_value", "why"],
+          "additionalProperties": false,
+          "properties": {
+            "version": { "type": "string" },
+            "previous_value": { "type": ["number", "string", "boolean"] },
+            "why": { "type": "string" }
+          }
+        },
+
+        "caveat": {
+          "type": "string",
+          "description": "A limit on the value that must travel with it to every place it is printed. Attribution that is consistent with a mechanism but not proof of it is the standard case: the caveat names the evidence that would settle it."
+        },
+
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Free-form grouping, for selecting sets of values in a template. Never load-bearing for validation."
+        }
+      },
+
+      "allOf": [
+        {
+          "$comment": "D5. A derived value must name its inputs and print its formula. This is the rule whose absence made an interconnect ceiling unreproducible from the very curve published two pages earlier.",
+          "if": { "properties": { "kind": { "const": "derived" } }, "required": ["kind"] },
+          "then": { "required": ["inputs", "formula", "conditions"] }
+        },
+        {
+          "$comment": "D8. An assumption or a projection must argue for itself in print. The traffic mixture that was presented as measured could not have survived a required rationale field.",
+          "if": {
+            "properties": { "kind": { "enum": ["assumption", "projection"] } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["rationale"] }
+        },
+        {
+          "$comment": "A projection additionally has to say what it extends. A projection with no inputs is a guess wearing an arithmetic costume.",
+          "if": { "properties": { "kind": { "const": "projection" } }, "required": ["kind"] },
+          "then": { "required": ["inputs", "formula", "conditions"] }
+        },
+        {
+          "$comment": "A published figure must carry both halves of its provenance: where it came from, and how it was unpacked into the quantity being compared.",
+          "if": { "properties": { "kind": { "const": "published" } }, "required": ["kind"] },
+          "then": { "required": ["provenance"] }
+        },
+        {
+          "$comment": "D12. A fixed test set must publish its cases, and must state both what a pass licenses and what it does not.",
+          "if": { "properties": { "kind": { "const": "fixed-test-set" } }, "required": ["kind"] },
+          "then": { "required": ["cases", "licenses", "does_not_license"] }
+        },
+        {
+          "$comment": "An enumerated fact must say why it was counted rather than exercised, so coverage is not overstated by omission.",
+          "if": { "properties": { "kind": { "const": "enumerated" } }, "required": ["kind"] },
+          "then": { "required": ["why_not_measured"] }
+        },
+        {
+          "$comment": "A supplied value must name who supplied it. It is an input to the report, not a finding of it.",
+          "if": { "properties": { "kind": { "const": "supplied" } }, "required": ["kind"] },
+          "then": { "required": ["supplied_by"] }
+        },
+        {
+          "$comment": "D4. A measured value must state the conditions it was taken under and how many samples it rests on. Without conditions there is no way to tell a like-for-like comparison from a cross-condition one.",
+          "if": { "properties": { "kind": { "const": "measured" } }, "required": ["kind"] },
+          "then": { "required": ["conditions", "n"] }
+        },
+        {
+          "$comment": "D1 and D3. A numeric value must fix its own rendering precision, so every appearance of it rounds identically. Drift between a table and a sentence is arithmetically impossible once this holds.",
+          "if": { "properties": { "value": { "type": "number" } }, "required": ["value"] },
+          "then": { "required": ["precision"] }
+        },
+        {
+          "$comment": "A range must also fix precision, since both ends get rendered.",
+          "if": {
+            "properties": { "value": { "$ref": "#/$defs/value_range" } },
+            "required": ["value"]
+          },
+          "then": { "required": ["precision"] }
+        },
+        {
+          "$comment": "A multi-sample value must either report its spread or say why it cannot. This is what lets the report derive a real threshold for 'this difference is not noise' instead of asserting that two runs agreed to about one per cent.",
+          "if": {
+            "properties": { "n": { "type": "integer", "exclusiveMinimum": 1 } },
+            "required": ["n"]
+          },
+          "then": {
+            "anyOf": [
+              { "required": ["spread"] },
+              { "required": ["spread_not_available"] }
+            ]
+          }
+        },
+        {
+          "$comment": "D11. A derivation permitted to run with a missing input must justify the fallback, because the alternative to failing is answering confidently and wrongly on the next machine.",
+          "if": {
+            "properties": { "requires_inputs_present": { "const": false } },
+            "required": ["requires_inputs_present"]
+          },
+          "then": { "required": ["rationale"] }
+        },
+        {
+          "$comment": "D2. A value that aggregates over units must state the method and the unit count, so no section can restate it at the wrong scope.",
+          "if": {
+            "properties": {
+              "aggregation": {
+                "type": "object",
+                "properties": { "over": { "const": "units" } },
+                "required": ["over"]
+              }
+            },
+            "required": ["aggregation"]
+          },
+          "then": {
+            "properties": {
+              "aggregation": { "required": ["over", "method", "unit_count"] }
+            }
+          }
+        }
+      ]
+    },
+
+    "roof": {
+      "description": "A ceiling the workload is measured against: a full value envelope plus the fields a ceiling needs. Roof classes are named neutrally (constraint B-C2) so the same object describes a compute limit, a bandwidth limit, an interconnect limit, a power limit or a capacity limit in any domain.",
+      "allOf": [
+        { "$ref": "#/$defs/envelope" },
+        {
+          "type": "object",
+          "required": ["roof_class", "is_floor"],
+          "properties": {
+            "roof_class": {
+              "enum": [
+                "compute",
+                "bandwidth",
+                "interconnect",
+                "capacity",
+                "power",
+                "thermal",
+                "latency",
+                "io",
+                "other"
+              ],
+              "description": "Which kind of limit this is. Domain-neutral by design: the report's job is to say which ceiling a machine is hitting, and that question is the same for any device."
+            },
+            "is_floor": {
+              "type": "boolean",
+              "description": "MANDATORY. True when the roof was measured in shared mode or otherwise under contention, meaning the true ceiling is at least this high and unknown. A floor printed as a ceiling makes every derived percentage an upper bound on achievement rather than the achievement itself, and every value derived from it must set inherits_floor. The source report's roofs came from a shared-mode run, and this flag is the only reason that fact can be made to travel with them."
+            },
+            "how_to_measure_true_ceiling": {
+              "type": "string",
+              "description": "What run would turn the floor into a ceiling, when is_floor is true. Names the maintenance window or exclusive pass required, so the limitation is actionable."
+            },
+            "binding_regime": {
+              "type": "string",
+              "description": "The region of the workload space where this roof is the binding one. Two roofs that bind in different regimes must never be averaged into one headline."
+            },
+            "ridge": {
+              "$ref": "#/$defs/identifier",
+              "description": "Id of the derived value marking where this roof stops binding and another takes over. The crossover point is the whole reason a roofline analysis says anything."
+            }
+          }
+        }
+      ]
+    },
+
+    "system_under_test": {
+      "type": "object",
+      "description": "What was measured, in enough detail that a reader can tell whether their machine is the same machine. Neutral vocabulary throughout: 'units' rather than any one domain's word for a device.",
+      "required": ["identity", "units"],
+      "additionalProperties": true,
+      "properties": {
+        "identity": {
+          "type": "string",
+          "description": "Short name for the system as a whole, as the report will refer to it."
+        },
+        "host": {
+          "type": "object",
+          "description": "The enclosing machine: operating system, kernel, board, firmware, processors, memory. Firmware and board matter more often than anyone expects, because a slot's real width is a board property.",
+          "additionalProperties": true
+        },
+        "units": {
+          "type": "array",
+          "minItems": 1,
+          "description": "The devices under test. Two units of the same model are still two units, and the report must be able to say where they differ. D2 was fundamentally a failure to keep per-unit values distinct.",
+          "items": {
+            "type": "object",
+            "required": ["index", "model"],
+            "additionalProperties": true,
+            "properties": {
+              "index": { "type": ["integer", "string"] },
+              "model": { "type": "string" },
+              "serial_redacted": { "type": "boolean" },
+              "firmware": { "type": "string" },
+              "attachment": {
+                "type": "object",
+                "description": "How the unit is attached to the host, including negotiated versus nominal link parameters. A unit attached through a narrower or slower path than its sibling is a different unit for every practical purpose, however identical the model string.",
+                "additionalProperties": true,
+                "properties": {
+                  "nominal": { "type": "string" },
+                  "negotiated": { "type": "string" },
+                  "upstream": {
+                    "type": "string",
+                    "description": "What the unit hangs off. The distinction between one host path and another is frequently the finding."
+                  }
+                }
+              },
+              "limits": {
+                "type": "object",
+                "description": "Rated limits as configured, such as a power or clock ceiling. Distinguish rated from observed: the observed value belongs in measurements[].",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "topology": {
+          "type": "string",
+          "description": "How units reach each other and the host, verbatim from whatever tool reports it. Kept verbatim because a paraphrased topology is a topology someone got wrong."
+        },
+        "measurement_state_note": {
+          "type": "string",
+          "description": "The state the system was in while measured, where that qualifies every roof taken from it. If roofs are floors, say it here as well as on each roof: a reader who starts in the middle of the report needs to meet the caveat where they are."
+        },
+        "sanitised": {
+          "type": "object",
+          "description": "What was removed from the disclosure before publication, and what was kept. Publishing this list is what allows a redacted bundle to still be assessed for completeness.",
+          "additionalProperties": true,
+          "properties": {
+            "removed": { "type": "array", "items": { "type": "string" } },
+            "retained": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "software_stack": {
+      "type": "object",
+      "description": "The software the measurement ran through. The argument this object encodes: the serving or execution stack is PART of the result, not documentation about it. A different stack on the same hardware is a different measurement, and the launch configuration is therefore data, not prose.",
+      "required": ["components", "configuration"],
+      "additionalProperties": true,
+      "properties": {
+        "components": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "version"],
+            "additionalProperties": true,
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": "string" },
+              "role": { "type": "string" },
+              "source": {
+                "type": "string",
+                "description": "Container image, package or build the component came from. A version string without a build identity is not reproducible."
+              }
+            }
+          }
+        },
+        "configuration": {
+          "type": "object",
+          "description": "How the stack was launched, flag by flag, with what each flag does to the numbers. A flag that changes a result and is not disclosed makes every comparison against another system meaningless.",
+          "required": ["verbatim", "flags"],
+          "additionalProperties": false,
+          "properties": {
+            "verbatim": {
+              "type": "string",
+              "description": "The launch invocation exactly as issued. Verbatim, because a reconstructed command is a guess about what ran."
+            },
+            "flags": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["flag", "effect"],
+                "additionalProperties": false,
+                "properties": {
+                  "flag": { "type": "string" },
+                  "value": { "type": ["string", "number", "boolean", "null"] },
+                  "effect": {
+                    "type": "string",
+                    "description": "How this setting shows up in the measured numbers. 'Default' is not an effect; a default has consequences too."
+                  },
+                  "invalidates_comparison": {
+                    "type": "boolean",
+                    "description": "True when a system configured differently on this flag cannot be compared with this one at all. Marks the flags that turn a benchmark table into a category error."
+                  },
+                  "resolved_value": {
+                    "type": "string",
+                    "description": "What the stack actually resolved the setting to, where that differs from what was passed or from the documented default. A setting nobody passed either way still has a resolved value, and assuming it is the documented default is how two sections of a report come to contradict each other about whether a feature was even on."
+                  }
+                }
+              }
+            },
+            "resource_accounting": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/identifier" },
+              "description": "Envelope ids for the stack's own reported resource split, per unit. Referenced rather than restated so a capacity argument later in the report cannot use a different number for the same quantity."
+            },
+            "scheduler_behaviour": {
+              "type": "string",
+              "description": "How the stack admits, batches or queues work, where that shapes the observed curve. A saturation point is a property of the scheduler as much as of the hardware."
+            }
+          }
+        }
+      }
+    },
+
+    "workload": {
+      "type": "object",
+      "description": "MANDATORY. What was actually submitted to the system. The source report had to add this section in a late edition, because 'synthetic inputs' had appeared exactly once, in a subordinate clause, while every throughput figure in the document depended on the input distribution. A schema that lets workload be omitted reproduces that gap by construction. The same argument that makes the software stack part of the measurement makes the workload part of it.",
+      "required": [
+        "corpus_kind",
+        "size_control",
+        "uniqueness_and_cache_defeat",
+        "output_size_policy",
+        "why_this_workload",
+        "not_claimed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "corpus_kind": {
+          "enum": ["synthetic", "real-corpus", "sampled-production"],
+          "description": "Where the inputs came from. Each choice buys something and costs something, and which one it is determines what the results may be compared against."
+        },
+        "generation": {
+          "type": "object",
+          "description": "Required when corpus_kind is synthetic: the recipe, in full, so the corpus can be regenerated rather than described.",
+          "required": ["template", "uniqueness_mechanism"],
+          "additionalProperties": true,
+          "properties": {
+            "template": {
+              "type": "string",
+              "description": "The input template verbatim, with its placeholders."
+            },
+            "filler": {
+              "type": "string",
+              "description": "What the bulk of the input is made of, where the template is padded to a size."
+            },
+            "uniqueness_mechanism": {
+              "type": "string",
+              "description": "How two inputs are made to differ, and WHERE the differing part sits. Position matters: a unique suffix still shares a cacheable prefix, so the mechanism is only as good as its placement."
+            },
+            "seed": {
+              "type": ["string", "integer"],
+              "description": "Seed for the generator, so the corpus is regenerable rather than merely describable."
+            }
+          }
+        },
+        "corpus": {
+          "type": "object",
+          "description": "Required when corpus_kind is real-corpus or sampled-production: which corpus, at what version, under what licence, and what may be redistributed.",
+          "required": ["identity", "licence"],
+          "additionalProperties": true,
+          "properties": {
+            "identity": { "type": "string" },
+            "version": { "type": "string" },
+            "licence": {
+              "type": "string",
+              "description": "Licence of the corpus. Required, because a result that cannot be reproduced without a licence nobody can obtain is not reproducible."
+            },
+            "redistributable": { "type": "boolean" },
+            "sampling_method": {
+              "type": "string",
+              "description": "For sampled production data: how the sample was drawn, and what it is a sample OF. An unstated sampling method makes a production-derived distribution an assumption in disguise."
+            },
+            "privacy_treatment": { "type": "string" }
+          }
+        },
+        "size_control": {
+          "type": "object",
+          "description": "How input size was controlled, and the MEASURED check that the control worked. A requested size is an intention; the system's own counter is the fact. The gap between them belongs in the report, per size, not in a footnote saying they were close.",
+          "required": ["requested_in", "counted_in", "method", "verification"],
+          "additionalProperties": false,
+          "properties": {
+            "requested_in": {
+              "type": "string",
+              "description": "The unit the harness asked in."
+            },
+            "counted_in": {
+              "type": "string",
+              "description": "The unit the system counted in. When these differ, everything downstream rests on an approximation, and the approximation must be measured rather than assumed."
+            },
+            "method": { "type": "string" },
+            "verification": {
+              "type": "array",
+              "minItems": 1,
+              "description": "MEASURED requested-versus-actual ratios, one entry per size actually used. Per-size and not a single headline ratio: an approximation that holds at one size can fail at another, and a report that checked one size and generalised has checked nothing.",
+              "items": {
+                "type": "object",
+                "required": ["requested", "counted", "ratio"],
+                "additionalProperties": false,
+                "properties": {
+                  "condition": {
+                    "$ref": "#/$defs/conditions",
+                    "description": "Which measurement point this check came from."
+                  },
+                  "requested": { "type": "number" },
+                  "counted": {
+                    "type": "number",
+                    "description": "The system's own counter, not the harness's belief."
+                  },
+                  "ratio": { "type": "number" },
+                  "counter_source": { "type": "string" }
+                }
+              }
+            },
+            "basis_for_reported_rates": {
+              "enum": ["requested", "counted"],
+              "description": "Which of the two bases every reported rate uses. One choice, applied everywhere. Two tables using different bases for the same quantity is the mechanism of D1, in the units rather than the digits."
+            }
+          }
+        },
+        "uniqueness_and_cache_defeat": {
+          "type": "object",
+          "description": "How the workload avoids measuring a cache instead of the machine, and the COUNTER READINGS that prove it. An argument that the cache was defeated by construction is a claim; the cache's own counters are evidence. D9 lived here: sections disagreed about whether a cache was active because nobody had read the counters and put them in one place.",
+          "required": ["policy", "cache_counters"],
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "type": "string",
+              "description": "The rule that makes inputs non-repeating, and what it would take to break it."
+            },
+            "cache_counters": {
+              "type": "object",
+              "description": "Readings from the system's own cache counters over the measurement window. Required. A resolved state of 'off' is a perfectly good reading, and is a different statement from 'on but defeated' - conflating the two is exactly what produced two contradicting sections.",
+              "required": ["source", "interpretation"],
+              "additionalProperties": true,
+              "properties": {
+                "source": { "type": "string" },
+                "queries": { "type": ["number", "null"] },
+                "hits": { "type": ["number", "null"] },
+                "hit_rate": { "type": ["number", "null"] },
+                "resolved_state": {
+                  "enum": ["on", "off", "unknown", "not-applicable"],
+                  "description": "What the system actually resolved the cache to, as opposed to what its documentation implies. A feature nobody configured either way still has a state."
+                },
+                "interpretation": {
+                  "type": "string",
+                  "description": "What these readings license the report to say. Required, so the numbers cannot be left for each section to interpret its own way."
+                }
+              }
+            }
+          }
+        },
+        "output_size_policy": {
+          "type": "string",
+          "description": "How much output each request was asked to produce, and why. Output size moves throughput as much as input size does, and a benchmark that fixes one while leaving the other unstated has an uncontrolled variable."
+        },
+        "distribution": {
+          "type": "object",
+          "description": "The size mixture, when the workload replays a mixture rather than a single size. D8: a long-tailed mixture was presented as if measured when it was assumed. The kind field here is REQUIRED and closed, so a mixture cannot be published without declaring which it is.",
+          "required": ["kind", "shares"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": ["measured", "assumption", "published", "sampled-production"],
+              "description": "Where the mixture came from. D8."
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Required in practice whenever kind is assumption: what the shares are based on, and what the report may therefore not conclude from any weighted average of them. The honest use of an assumed mixture is to show the SPREAD across sizes; a weighted mean of an assumed mixture is an assumption dressed as a result."
+            },
+            "shares": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["size", "share"],
+                "additionalProperties": false,
+                "properties": {
+                  "size": { "type": ["number", "string"] },
+                  "share": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            },
+            "weighted_summary_permitted": {
+              "type": "boolean",
+              "default": false,
+              "description": "Whether a single weighted figure may be quoted from this mixture. Defaults to false, because for an assumed mixture the spread is the finding and the average is not usable."
+            }
+          }
+        },
+        "why_this_workload": {
+          "type": "string",
+          "description": "What this workload choice buys, and what it costs. Every workload choice costs something; a section that lists only the benefit is advocacy."
+        },
+        "not_claimed": {
+          "type": "string",
+          "description": "What the workload does NOT establish, including which external benchmark suites these results are therefore not comparable with. Required. Comparability with a named suite is a property of the input distribution, and borrowing a suite's vocabulary without this line reads as a submission to it."
+        },
+        "secondary_workloads": {
+          "type": "array",
+          "description": "Additional workload profiles in the same bundle, each fully disclosed on its own terms. A co-resident service measured alongside the primary one needs its own corpus disclosure, not a shared assumption.",
+          "items": {
+            "type": "object",
+            "required": ["id", "workload"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/identifier" },
+              "purpose": { "type": "string" },
+              "workload": { "$ref": "#/$defs/workload" }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "A synthetic corpus must publish its generation recipe; there is nothing else to point at.",
+          "if": {
+            "properties": { "corpus_kind": { "const": "synthetic" } },
+            "required": ["corpus_kind"]
+          },
+          "then": { "required": ["generation"] }
+        },
+        {
+          "$comment": "A real or sampled corpus must name itself and its licence, or the result cannot be reproduced by anyone else.",
+          "if": {
+            "properties": {
+              "corpus_kind": { "enum": ["real-corpus", "sampled-production"] }
+            },
+            "required": ["corpus_kind"]
+          },
+          "then": { "required": ["corpus"] }
+        },
+        {
+          "$comment": "D8. An assumed mixture must carry a rationale, so no reader mistakes it for an observation.",
+          "if": {
+            "properties": {
+              "distribution": {
+                "type": "object",
+                "properties": { "kind": { "const": "assumption" } },
+                "required": ["kind"]
+              }
+            },
+            "required": ["distribution"]
+          },
+          "then": {
+            "properties": { "distribution": { "required": ["kind", "shares", "rationale"] } }
+          }
+        }
+      ]
+    },
+
+    "figure": {
+      "type": "object",
+      "description": "A chart, plus the table that makes it checkable. Every figure must reference envelope ids for its data, so a figure and its table view are two renderings of one object and cannot disagree. A chart whose numbers exist only inside the chart is not evidence.",
+      "required": ["id", "title", "table_view"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "title": { "type": "string" },
+        "chart_type": {
+          "enum": [
+            "bar",
+            "grouped-bar",
+            "stacked-bar",
+            "line",
+            "scatter",
+            "part-to-whole",
+            "roofline",
+            "heatmap",
+            "table-only"
+          ],
+          "description": "How the data is drawn. Neutral chart vocabulary only; nothing here names a domain."
+        },
+        "axes": {
+          "type": "object",
+          "description": "Axis definitions, including scale. Scale is load-bearing: whether a curve looks linear is a property of the axis, and a ceiling derived by interpolating on the wrong scale is D5.",
+          "additionalProperties": false,
+          "properties": {
+            "x": { "$ref": "#/$defs/axis" },
+            "y": { "$ref": "#/$defs/axis" }
+          }
+        },
+        "note": {
+          "type": "string",
+          "description": "What the reader should take from the figure. If a figure needs no note, it may not need to exist."
+        },
+        "table_view": {
+          "description": "REQUIRED. Either the table's own definition, or a declaration that this figure shares another figure's table. The source report has two figures that are a latency view and a bandwidth view of ONE sweep; the second shares the first's table rather than reprinting it, which is both honest and drift-proof.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["columns", "value_ids"],
+              "additionalProperties": false,
+              "properties": {
+                "columns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string" }
+                },
+                "value_ids": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "$ref": "#/$defs/identifier" },
+                  "description": "Envelope ids supplying every cell. Ids, not numbers: a table of literals beside a chart of envelopes is two sources of truth, which is the whole family of defects this schema exists to prevent."
+                },
+                "row_axis": {
+                  "type": "string",
+                  "description": "Which condition key indexes the rows, when the table renders a series."
+                },
+                "caption": { "type": "string" }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["same_as_figure"],
+              "additionalProperties": false,
+              "properties": {
+                "same_as_figure": {
+                  "$ref": "#/$defs/identifier",
+                  "description": "Id of the figure whose table this one shares. Permitted only when both figures are views of the same underlying values."
+                },
+                "why": { "type": "string" }
+              }
+            }
+          ]
+        },
+        "reference_lines": {
+          "type": "array",
+          "description": "Ceilings, floors or thresholds drawn on the chart, by envelope id. A roof drawn as a hand-placed line is a number outside the contract.",
+          "items": {
+            "type": "object",
+            "required": ["value_id"],
+            "additionalProperties": false,
+            "properties": {
+              "value_id": { "$ref": "#/$defs/identifier" },
+              "label": { "type": "string" },
+              "is_floor": {
+                "type": "boolean",
+                "description": "Mirrors the roof's own is_floor, so a line that is really a floor is drawn and labelled as one."
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "axis": {
+      "type": "object",
+      "required": ["label", "scale"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "type": "string" },
+        "unit": { "$ref": "#/$defs/unit" },
+        "scale": {
+          "enum": ["linear", "log", "log2", "log10", "categorical"],
+          "description": "Required. D5: a derivation interpolated a quantity log-linearly where it was linear in the axis variable, and the mistake was invisible because no scale was ever declared. Declaring the scale next to the data makes the interpolation rule checkable."
+        },
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+
+    "version_history_entry": {
+      "type": "object",
+      "description": "One edition of the report. D7: a published version history was missing two of its own versions and out of order. Each entry names its predecessor, so the chain can be walked and a gap is a validation failure rather than something a reader has to notice.",
+      "required": [
+        "version",
+        "date",
+        "summary",
+        "measured_values_moved",
+        "run_provenance_changed",
+        "previous_version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "type": "string" },
+        "date": { "type": "string" },
+        "previous_version": {
+          "type": ["string", "null"],
+          "description": "The version this one succeeds, or null for the first edition. Makes the history a linked chain rather than a list: a missing edition breaks the chain instead of passing unnoticed. D7."
+        },
+        "release_kind": {
+          "enum": ["major", "minor"],
+          "description": "Major means the measurements or the analysis changed; minor means only the presentation did. Stated so the distinction is applied consistently rather than by feel."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 3,
+          "description": "What changed and why, in the report's own voice."
+        },
+        "measured_values_moved": {
+          "type": "boolean",
+          "description": "Whether any measured value differs from the previous edition. A report that revises a number silently has broken its contract with everyone who cited the old one, so this is a required field rather than an editorial choice."
+        },
+        "moved_values": {
+          "type": "array",
+          "description": "Required when measured_values_moved is true: every value that changed, with both readings and the reason. This is what makes 'no number was silently revised' a checkable statement.",
+          "items": {
+            "type": "object",
+            "required": ["value_id", "from", "to", "why"],
+            "additionalProperties": false,
+            "properties": {
+              "value_id": { "$ref": "#/$defs/identifier" },
+              "from": { "type": ["number", "string", "boolean", "null"] },
+              "to": { "type": ["number", "string", "boolean", "null"] },
+              "why": { "type": "string" }
+            }
+          }
+        },
+        "run_provenance_changed": {
+          "type": "boolean",
+          "description": "Whether the set of contributing runs, or which run any value came from, changed. D10: an edition can add or drop a run artefact without a single printed number moving, and a reader tracking reproducibility needs that flagged separately from the values."
+        },
+        "verified_by": {
+          "type": "string",
+          "description": "How the two claims above were established: a numeric diff of both builds, a rebuild with each run removed, or similar. Verified by assertion is not verified."
+        },
+        "defects_closed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Review defects this edition closed. Keeping the register in the artefact rather than in a mailbox is why the same defect class does not return in the next edition."
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "D7 and the no-silent-revision rule: if a measured value moved, every one of them must be listed with both readings.",
+          "if": {
+            "properties": { "measured_values_moved": { "const": true } },
+            "required": ["measured_values_moved"]
+          },
+          "then": {
+            "properties": { "moved_values": { "minItems": 1 } },
+            "required": ["moved_values"]
+          }
+        }
+      ]
+    }
+  }
+}

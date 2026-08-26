@@ -1,0 +1,29 @@
+# Build artefacts
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# MEASUREMENT OUTPUT, deliberately not tracked.
+#
+# results/ and reports/ hold measurements taken from specific machines. They are sanitised, but
+# they are still one estate's data rather than the tool, and a general-purpose benchmark that
+# ships someone's numbers invites those numbers to be quoted as the tool's own. Publish results
+# where they belong: alongside the report that interprets them.
+results/
+reports/
+
+# Site-specific redaction terms. This file names an estate's own nouns; keeping it out of the tool
+# is the whole point of the mechanism (see README, "The redaction gate").
+denylist.txt
+.denylist
+
+# Experiment configuration, which names containers, models and paths on a particular deployment.
+gpubench.json
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
