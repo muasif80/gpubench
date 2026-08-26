@@ -35,6 +35,45 @@ wrote result.html
 
 ---
 
+## What it produced: a worked example
+
+The tool was written to answer one question about one machine, and the report it produced is the
+best documentation of what it does.
+
+> ### Two RTX 5090s, one consumer board, and the link between them
+>
+> **[Read it &rarr;](examples/README.md)**
+>
+> Two identical cards. Identical compute, identical memory bandwidth, and a **3.4x difference in
+> effective PCIe bandwidth** because one of them sits in a chipset slot. What that asymmetry costs
+> turns out to depend entirely on the workload: almost nothing for chat, roughly an order of
+> magnitude for prompt processing.
+
+**The finding.** Prefill is limited by the **interconnect** between the devices; decode is limited by
+**memory bandwidth**. Same machine, same silicon, two different binding constraints, and the remedy
+for one is irrelevant to the other. Every figure behind that is on the example page, generated from
+the published result files rather than typed &mdash; which is the discipline this tool exists to
+enforce, so its own README had better follow it.
+
+**The control that reframed it.** Single-device serving was arithmetic in earlier editions. It was
+then attempted for real, in a maintenance window, through the `experiment` mechanism: the engine
+fails to initialise on one device at any context length. So tensor parallelism on that deployment is
+not an optimisation that could be removed &mdash; it is what makes the model servable at all.
+
+**What it is honest about.** One machine, one engine, one model, one sample. Roofs measured in
+shared mode are floors, so every percentage-of-roof is an upper bound. The load generator is
+closed-loop, so the latency percentiles are optimistic. The central claim is an attribution, not a
+causal proof, and the measurement that would settle it is named and has not been taken.
+
+### The example data
+
+`examples/results/` holds the tool's own result files from that work, including the corrected
+serving sweep the report's capacity tables are built from, plus a run from a very different machine
+for contrast. Every file passes `python -m gpubench.longform.redact examples/`, and
+`examples/results/README.json` records what is there, what is not, and why.
+
+---
+
 ## Why another one
 
 | Existing tool | What it leaves out |

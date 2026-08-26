@@ -38,7 +38,37 @@ __all__ = [
     "PAGE_CSS", "assemble", "contents", "renumber", "reorder_sections", "resolve_refs", "stat",
     "esc", "figure", "fmt", "frame", "legend", "lg", "lin", "marker", "nice_ticks", "polyline",
     "strip_style", "svg_close", "svg_open", "table", "render_report",
+    "render_companions",
 ]
+
+
+def render_companions(content, figures, data, warn=None):
+    """Optional companion pages: appendices better shipped beside a report than inside it.
+
+    A long-form report usually carries material that is genuinely valuable and genuinely not part
+    of the argument -- a method primer, a harness walkthrough, a change log. Left in the body it
+    inflates the page count and is the least-read part of the document; deleted, something worth
+    keeping is lost. A companion page is the third option.
+
+    A content module opts in by defining:
+
+        COMPANIONS = {"method-primer.html": ("Page title", "render_fn_name")}
+
+    where the named function takes (figures, data) and returns section HTML. Each page goes through
+    the same assembly as the report, so it keeps the stylesheet, the numbering and the contents.
+    Returns {filename: html}.
+    """
+    spec = getattr(content, "COMPANIONS", None) or {}
+    out = {}
+    for filename, (title, fn_name) in spec.items():
+        fn = getattr(content, fn_name, None)
+        if not callable(fn):
+            raise SystemExit("companion %r names %r, which the content module does not define"
+                             % (filename, fn_name))
+        body = fn(figures, data)
+        order = getattr(content, "COMPANION_ORDER", {}).get(filename, [])
+        out[filename] = assemble(body, title, order, warn=warn)
+    return out
 
 
 def render_report(content, run_dir, out_dir=None, warn=None):

@@ -255,6 +255,15 @@ def cmd_article(args):
     for out in (html_path, index_path):
         with open(out, "w", encoding="utf-8") as f:
             f.write(html)
+    # Companion pages, if the content module declares any.
+    from .longform import render_companions
+    for fname, chtml in (render_companions(content, figs, _data,
+                                           warn=lambda m: print("  note: %s" % m)) or {}).items():
+        cpath = os.path.join(out_dir, fname)
+        with open(cpath, "w", encoding="utf-8") as f:
+            f.write(chtml)
+        print("wrote %s (%.0f KB, companion)" % (cpath, len(chtml) / 1024.0))
+
     print("built %d figure(s)" % len(figs))
     print("wrote %s (%.0f KB)" % (html_path, len(html) / 1024.0))
 

@@ -61,6 +61,11 @@ def site_literals(root):
 # Public, retail, or open-source names that are safe and expected in a benchmark disclosure.
 ALLOW = {
     "1.7", "2.11", "0.23", "5.12", "2.28", "13.0", "24.04", "6.8", "590.48",
+    # Loopback and the unspecified address identify nothing: they are the same on every machine on
+    # earth, and a probe that talks to a service on the host it is measuring records them as a
+    # matter of course. Flagging them trains the operator to ignore the gate, which is how a real
+    # finding gets waved through.
+    "127.0.0.1", "0.0.0.0", "::1", "localhost",
 }
 
 SCAN_EXT = {".html", ".htm", ".svg", ".md", ".json", ".csv", ".txt", ".log"}
@@ -129,8 +134,17 @@ def check_lines(path, lines, lits, hits, member=""):
                 tok = m.group(0)
                 if tok in ALLOW:
                     continue
-                if label == "IPv4 address" and not plausible_ip(tok):
-                    continue
+                if label == "IPv4 address":
+                    if not plausible_ip(tok):
+                        continue
+                    # A dotted quad that is part of a LONGER dotted string is a version, not an
+                    # address. A VBIOS reads 94.07.56.40.17, whose first four groups match the
+                    # IPv4 pattern exactly. Look at what sits either side of the match.
+                    j = line.find(tok)
+                    after = line[j + len(tok):j + len(tok) + 2]
+                    before = line[max(0, j - 2):j]
+                    if re.match(r"^\.\d", after) or re.search(r"\d\.$", before):
+                        continue
                 if label.startswith("long ") and tok.isdigit():
                     continue
                 if label.startswith("long ") and _is_declared_digest(line, tok):
