@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.2.0
+
+A report whose numbers disagree with each other can no longer be built.
+
+- **New `gpubench verify`**: a deterministic pre-render gate over a claims manifest. It checks that
+  one quantity has one value, that every derived figure recomputes from its declared inputs and
+  formula, that ratios name their denominator basis, that request counts are whole multiples of
+  their concurrency, that percentiles resolve to a rank worth reporting, that an arrival process is
+  declared, that a fraction-of-roof measured in shared mode carries its caveat where the reader
+  meets it, that every figure has a table view, and that a quality gate publishes its cases.
+  Exit 1 on any error, so the render does not happen: a report that fails verification should not
+  exist as a file, because a file is the thing that gets sent to people.
+- `gpubench verify --demo` runs it against a fixture carrying defects taken from real editions of a
+  real report, including a headline number that disagreed with itself by 12%, a sentence asserting
+  the opposite of its own table, and a sweep level whose request count was not a whole multiple of
+  its concurrency.
+- **The rule the gate is built around**: never edit a measured value to make a check pass. The
+  permitted responses are fix the generator, fix the prose, re-measure, or declare the exception in
+  the manifest. A verifier with edit access converges on a report that agrees with itself perfectly
+  and has drifted away from what the machine did, which is worse than an inconsistent one because
+  the inconsistency was the only visible symptom.
+- README rewritten end to end: all six commands with their flags and the risk each carries, the
+  probe/derivation/diagnostic tables, the experiment gates, the content-module contract, and an
+  honest "what it does not do". The previous one claimed no accuracy validation, no variance
+  measurement and no INT4 or video measurement, all of which had become false.
+
 ## 1.1.0
 
 An independent review of a report built with this tool found a 12% contradiction on its primary
