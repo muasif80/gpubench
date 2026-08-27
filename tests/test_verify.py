@@ -984,12 +984,36 @@ class TestUnitVocabularyIsStructural(Case):
 
     def test_english_after_a_numeral_is_not_a_unit(self):
         """The negative control, and the reason this is a shape rule rather than "any short word".
-        A rule that read "96 concurrent" as a measurement would demand a claim for every noun."""
-        doc = self.document("<p>96 concurrent users, 30 tokens each, on 5 GPUs over PCIe 4.0 x16 "
+        A rule that read any noun after a number as a measurement would demand a claim for every
+        one of them, and an author who has to declare "5 GPUs" learns to switch the gate off.
+
+        This test used to include "96 concurrent users" and assert a total of zero. It no longer
+        does, deliberately: an adversarial pass shipped exactly that string as a fabricated headline
+        figure, because a spelled-out unit was outside the vocabulary and the individual bare miss
+        was never named. Promotion is by a CLOSED LIST of phrases that are measurements in any
+        sentence, not by word shape, so the nouns below are still English. The positive half is
+        asserted in the next test rather than deleted from this one.
+        """
+        doc = self.document("<p>30 tokens each, on 5 GPUs over PCIe 4.0 x16 "
                             "at 25 UTC, sampled 8 times.</p>")
         f = self.run_verify(base_manifest(), doc)
         self.assertEqual(self.found(f, "A5", "error"), [], self.messages(f, "A5"))
         self.assertEqual(f.coverage["unit_bearing_total"], 0)
+
+    def test_a_spelled_out_unit_is_a_measurement(self):
+        """The positive half, and the attack it closes.
+
+        "96 concurrent users" and "47314 tokens per second" read as measurements to every human and
+        were invisible to a vocabulary of symbols. Each must now be traced or declared like any
+        other measurement, and each must be NAMED, because an aggregate percentage with slack in it
+        is how a single fabricated figure hides.
+        """
+        doc = self.document("<p>96 concurrent users at 47314 tokens per second.</p>")
+        f = self.run_verify(base_manifest(), doc)
+        flagged = {i.get("numeral") for i in self.found(f, "A5", "error")}
+        self.assertIn("96", flagged, self.messages(f, "A5"))
+        self.assertIn("47314", flagged, self.messages(f, "A5"))
+        self.assertGreaterEqual(f.coverage["unit_bearing_total"], 2)
 
     def test_a_currency_figure_is_held_to_the_unit_floor_not_the_bare_one(self):
         f = self.run_verify(base_manifest(), self.document("<p>It costs $0.36 per run.</p>"))

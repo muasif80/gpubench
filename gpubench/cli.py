@@ -179,6 +179,17 @@ def main(argv=None):
     p.add_argument("--out", default=None)
     p.add_argument("--no-open", action="store_true")
 
+    # The report template: the section outline, the run-bundle schema, the eleven lint rules and
+    # the scaffold. It shipped inside the package with nothing able to reach it, which is the same
+    # as not shipping it. The subcommands live in template/cli.py, beside the artefacts they read.
+    p = sub.add_parser(
+        "template", help="the report template: scaffold, lint, outline, schema",
+        description="Reusable report discipline: scaffold a report that passes the claims gate on "
+                    "its first build, lint a built report against the bundle behind it, print the "
+                    "canonical section outline, and enforce the run-bundle schema.")
+    from .template import cli as template_cli
+    template_cli.add_arguments(p)
+
     args = ap.parse_args(argv)
 
     if args.cmd == "inspect":
@@ -253,6 +264,10 @@ def main(argv=None):
         if not args.no_open:
             open_in_browser(out)
         return 0
+
+    if args.cmd == "template":
+        from .template import cli as template_cli
+        return template_cli.main(args)
     return 1
 
 

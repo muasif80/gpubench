@@ -39,8 +39,18 @@ PACKAGE_PARENT = os.path.dirname(os.path.dirname(HERE))
 if PACKAGE_PARENT not in sys.path:
     sys.path.insert(0, PACKAGE_PARENT)
 
-from template import lint as linter  # noqa: E402
-from template import outline as outline_reader  # noqa: E402
+# Two import paths, one module object. Loaded as `gpubench.template.tests.test_lint`, which is
+# what `python -m tests.test_template` does from the repo root, the package import wins; loaded as
+# `template.tests.test_lint` from inside the package's parent directory, the flat one does.
+# Importing the flat name unconditionally would hand this file a SECOND copy of lint.py, and the
+# tests below stub rules out on the module object: patching one copy while the command line runs
+# the other is a test that proves nothing.
+try:
+    from gpubench.template import lint as linter  # noqa: E402
+    from gpubench.template import outline as outline_reader  # noqa: E402
+except ImportError:  # pragma: no cover - running from the directory that holds `template`
+    from template import lint as linter  # noqa: E402
+    from template import outline as outline_reader  # noqa: E402
 
 FIXTURES = os.path.join(HERE, "fixtures")
 

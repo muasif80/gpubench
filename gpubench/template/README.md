@@ -79,8 +79,33 @@ does that. `lint-rules.md` argues this at length under "Why a linter and not a r
 
 ## 2. Quick start
 
-Every command below was run from `c:/Users/PC/projects/onprem-gpu-bench`, the directory that
-*contains* the `template` package. Run them from there, not from inside `template/`.
+The template is reachable from the tool's own command line. This is the surface to use:
+
+```
+gpubench template init <dir>        scaffold a report that builds and passes the claims gate
+gpubench template lint <run-dir> <report.html>   the eleven rules, over a built report
+gpubench template outline           the canonical sections, their invariants, their anti-patterns
+gpubench template schema            the run-bundle contract, printed or enforced (--validate FILE)
+```
+
+`gpubench template init` writes a content module, a synthetic run artefact and a README, and the
+result builds at exit 0 with the gate armed:
+
+```
+$ gpubench template init /tmp/demo
+$ gpubench article /tmp/demo/content.py /tmp/demo/run --out-dir /tmp/demo/out
+claims gate: manifest verified: 4 claim(s), 2 prose block(s), 1 figure(s), ...
+$ echo $?
+0
+```
+
+The run artefact it writes is marked `"sample": true`, and the generated `claims()` reads that
+mark: while it is there the claims are declared `supplied` with a source, and the moment the file
+is a real run they are declared `measured` with a run id. The kind follows the artefact.
+
+Everything below still works as a module invocation. Every command was run from
+`c:/Users/PC/projects/onprem-gpu-bench`, the directory that *contains* the `template` package. Run
+them from there, not from inside `template/`.
 
 Read the rules and see which sections stand between the report and each defect:
 
@@ -900,12 +925,32 @@ does not know, rather than reading the fields it recognises and ignoring the res
 The template exists to stop unfalsifiable claims, so a claim of completeness here would be the defect
 it exists to prevent. Everything below was verified by running it.
 
-### G1. No schema validator
+### G1. No schema validator: CLOSED, with one finding left open
 
-`run-schema.json` is a JSON Schema, and nothing in the template validates against it. `lint.py`
-checks only that the twelve required top-level keys are present (`BUNDLE_REQUIRED_KEYS`,
-`lint.py:509`). Types, enums, patterns, `required` inside `$defs`, `additionalProperties: false`: all
-unenforced. The proof is in the shipped fixture:
+`schema.py` now validates against `run-schema.json` with the standard library only, and
+`gpubench template schema --validate FILE` runs it. It implements the subset the schema uses and
+**refuses to return a verdict over a schema whose keywords it cannot all enforce**, because a
+partial pass reads exactly like a real one. `test_the_shipped_schema_is_fully_enforced` asserts
+that `unsupported_keywords(run-schema.json)` is empty, so adding a keyword to the schema fails the
+suite until the validator grows.
+
+What that immediately surfaced is the defect this section already predicted, and it is still open:
+every shipped fixture bundle declares `schema_version: "1.0.0"` while the schema's own pattern is
+`^[0-9]+\.[0-9]+$`, so all seven fixtures fail validation on that one field. Nothing was edited to
+make it go away. One of the two is wrong and a maintainer has to decide which:
+
+```
+$ gpubench template schema --validate template/tests/fixtures/clean/bundle.json
+$.schema_version
+  '1.0.0' does not match the pattern ^[0-9]+\.[0-9]+$
+1 violation(s)
+$ echo $?
+2
+```
+
+`lint.py` itself is unchanged and still checks only that the twelve required top-level keys are
+present (`BUNDLE_REQUIRED_KEYS`, `lint.py:509`); schema conformance is a separate command rather
+than a twelfth rule. The original proof of the gap, which still reproduces:
 
 ```
 $ python -c "import json,re; d=json.load(open('template/run-schema.json',encoding='utf-8')); \
@@ -1009,15 +1054,32 @@ unchanged: extend the artifact, never weaken the report.
 
 ## 10. Tests
 
+From the gpubench repo root, beside the other six suites:
+
 ```
-$ python -m unittest discover -s template/tests -t .
-Ran 87 tests in 0.981s
+$ python -m tests.test_template
+Ran 118 tests in 1.8s
 
 OK
 ```
 
+That entry point collects `test_lint.py` and `test_cli.py` and refuses to report a result if
+either module collects fewer tests than its floor, because a suite that quietly runs nothing
+passes. From the directory that contains the `template` package, the older invocation still works:
+
+```
+$ python -m unittest discover -s template/tests -t .
+```
+
 Verbosely, one test name per line: `python -m unittest template.tests.test_lint -v`. One class at a
 time: `python -m unittest template.tests.test_lint.L1OrphanLiteralTests -v` (8 tests).
+
+`test_cli.py` covers the subcommand. Its load-bearing test is the sequence the scaffold exists to
+satisfy: init into a temp directory, build with the real `gpubench article`, and read the exit
+code, the document and the manifest. Beside it sits the negative control that makes it mean
+something: break the derived total in the generated module and assert the build is BLOCKED and
+writes nothing. Without the control, "the scaffold passes" would also be true of a gate that
+passes everything.
 
 Two of the test classes are load-bearing in a way worth knowing about.
 
@@ -1052,10 +1114,14 @@ template/
   lint-rules.md           the eleven rules, in prose, with their defect citations (848 lines)
   lint.py                 the executable gate (4813 lines)
   outline.py              the YAML-subset reader (326 lines)
+  schema.py               the stdlib JSON Schema subset validator, and its refusal to guess
+  scaffold.py             `gpubench template init`: the generated content module and sample run
+  cli.py                  the four subcommands, wired into gpubench/cli.py
   __init__.py             package docstring and TEMPLATE_VERSION
   tests/
     __init__.py
-    test_lint.py          87 tests (960 lines)
+    test_lint.py          one test per rule, plus the outline reader (970 lines)
+    test_cli.py           the subcommand, including init -> build -> gate as one sequence
     fixtures/
       clean/                        bundle + authored + previous-bundle + report, passes everything
       d1_three_values/              one quantity printed three ways

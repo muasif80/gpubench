@@ -246,6 +246,19 @@ padding:13px 16px;margin:0 0 16px}
 .callout p:last-child{margin:0}
 .pill{display:inline-block;font-size:.72rem;padding:2px 8px;border-radius:20px;
 background:var(--panel);color:var(--ink2);border:1px solid var(--rule)}
+/* Verdict badges. A verdict that reads as silence is the defect these exist to prevent, so every
+   state gets a filled, labelled badge including the ones that mean "no answer". print-color-adjust
+   keeps the fill on paper, where a white-on-white badge would be exactly that silence again. */
+.badge{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.04em;padding:2px 8px;
+border-radius:4px;color:#fff;white-space:nowrap;-webkit-print-color-adjust:exact;
+print-color-adjust:exact}
+.b-ok{background:#0c6b2e}.b-warn{background:#a8620a}.b-bad{background:#b4232b}
+.b-unknown{background:#5c6470}.b-void{background:#5c6470}
+.why{font-size:.79rem;color:var(--muted);margin-top:5px;white-space:normal;max-width:34em}
+tr.voided td{background:var(--panel)}
+tr.voided td:first-child{border-left:3px solid var(--crit)}
+td s{color:var(--muted)}
+.lb{font-size:.72rem;color:var(--warn);white-space:nowrap}
 footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--rule);
 color:var(--muted);font-size:.82rem}
 @media print{
@@ -336,6 +349,165 @@ def _cache_sweep(res):
     return []
 
 
+# ---------------------------------------------------------------- serving levels
+#
+# The open-loop probe produces the only verdict in this tool a capacity decision would rest on.
+# The vocabulary below is deliberately identical to diagnose._open_loop_levels: one document that
+# names the same reading two different ways teaches a reader that the two are different readings.
+
+OPEN_LOOP_MODEL = "open_loop_poisson"
+
+
+def _serving_levels(res):
+    """Every serving level in the run, from whichever probe carried it.
+
+    A merged result may hold the closed-loop sweep and the open-loop sweep under different probe
+    names (serve_bench and serve_bench_openloop), because each sweep was collected in its own
+    session. Reading only the first probe is how the open-loop levels went unreported. The name
+    prefix is the scope: nothing outside the serving probes has levels this code understands.
+    """
+    out = []
+    for pname, probe in sorted((res.get("probes") or {}).items()):
+        if not isinstance(probe, dict) or not pname.startswith("serve_bench"):
+            continue
+        for lv in (probe.get("levels") or []):
+            if isinstance(lv, dict):
+                out.append(lv)
+    return out
+
+
+def _is_open_loop(lv):
+    return ((lv.get("arrival") or {}).get("model") == OPEN_LOOP_MODEL)
+
+
+def _open_loop_views(res):
+    """One view per open-loop level, carrying exactly the fields the rendering rules read."""
+    views = []
+    for lv in _serving_levels(res):
+        if not _is_open_loop(lv):
+            continue
+        arr = lv.get("arrival") or {}
+        qg = arr.get("queue_growth") or {}
+        views.append({
+            "rate": arr.get("target_rate_req_s"),
+            "achieved": arr.get("achieved_arrival_rate_req_s"),
+            # The current name, falling back to the deprecated one so a document written by an
+            # older probe is still read rather than silently treated as having no verdict.
+            "grew": (arr["latency_grew_over_the_level"]
+                     if "latency_grew_over_the_level" in arr else arr.get("fell_behind")),
+            "basis": (arr.get("latency_grew_over_the_level_basis")
+                      or arr.get("fell_behind_basis")),
+            "capacity": arr.get("engine_did_not_keep_up"),
+            "capacity_basis": arr.get("engine_did_not_keep_up_basis"),
+            "generator_kept_up": arr.get("generator_kept_up"),
+            "truncated": arr.get("truncated_by_harness_limit"),
+            "fraction": qg.get("completion_fraction"),
+            "floor": qg.get("completion_fraction_floor"),
+            "censored": qg.get("n_censored"),
+            "fit_n": qg.get("n"),
+            "dispatched": arr.get("requests_dispatched"),
+            "level": lv,
+        })
+    return views
+
+
+def _closed_loop_levels(res):
+    return [lv for lv in _serving_levels(res) if not _is_open_loop(lv)]
+
+
+def open_loop_verdict(view):
+    """(badge class, label, prose) for one open-loop level.
+
+    Four states, and they are not interchangeable. The third exists because latency growth is a
+    measurement of drift and not a diagnosis: on a machine serving several environments from one
+    engine, a co-tenant slowdown produces growth with no queue anywhere. A reader who collapses
+    the third state into the second sizes hardware for a cause that was never established.
+    """
+    if view["grew"] is None:
+        return ("b-unknown", "NOT JUDGED",
+                "This level measured latencies and cannot say whether they were growing. It is "
+                "not a level that passed.")
+    if open_loop_row_is_voided(view):
+        # A verdict is more load-bearing than a percentile, so voiding has to reach it too. The
+        # probe normally withholds the verdict itself when the generator misfires; a document that
+        # arrives with both a void condition and a verdict must not have the verdict read anyway.
+        return ("b-void", "VERDICT NOT READ, ROW VOIDED",
+                "The probe reached a verdict, but about a level whose arrivals were not the "
+                "process this row names. The condition that voided it is named beside the rate.")
+    if view["grew"] is True:
+        if view["capacity"] is True:
+            return ("b-bad", "ENGINE DID NOT KEEP UP",
+                    "Latency grew across the level and the engine's own waiting count grew with "
+                    "it, which is the pair that makes this a capacity statement.")
+        return ("b-warn", "LATENCY GREW, CAUSE NOT ESTABLISHED",
+                "Requests got slower through the level. That the offered rate caused it is not "
+                "shown: the engine's own waiting count either was unavailable or showed no queue.")
+    return ("b-ok", "LATENCY DID NOT GROW",
+            "Per-request latency was flat across the arrival window, so this rate was absorbed "
+            "rather than merely survived.")
+
+
+def open_loop_row_is_voided(view):
+    """A row whose numbers must be struck before any percentile on it is read.
+
+    A generator that missed its own schedule dispatched a catch-up burst, so the level did not
+    offer the arrival process it names. A truncated level stopped early, so its tail is the part
+    that never ran. Either way the percentiles describe a different experiment.
+    """
+    return view["generator_kept_up"] is False or bool(view["truncated"])
+
+
+def open_loop_percentile_lower_bound_reason(view):
+    """Why every percentile on this level is a lower bound, or None if it is not one.
+
+    Below the stated completion floor the missing requests are the slow ones: the requests that
+    would prove a queue are exactly the ones a client timeout removes, so what is left is a biased
+    sample of the fast ones.
+
+    The two absent-field branches exist because a field that only ever weakens a check is an
+    opt-out a level can simply omit. A level that reports no completion fraction has not shown
+    that its sample is complete, and a level that states no floor still shows a shortfall when
+    its own fraction is under one. Neither may render as an all-clear.
+    """
+    frac, floor = view["fraction"], view["floor"]
+    if frac is None:
+        return "completion fraction not reported"
+    if floor is not None and frac < floor:
+        return "below the %s%% completion floor" % fmt(floor * 100, 0)
+    if floor is None and frac < 1.0:
+        return "no completion floor stated, %s%% completed" % fmt(frac * 100, 0)
+    return None
+
+
+def open_loop_percentile_is_lower_bound(view):
+    return open_loop_percentile_lower_bound_reason(view) is not None
+
+
+def percentile_rank(n, p):
+    """Where a percentile actually lands in n sorted samples, using the probe's own method.
+
+    probes/serving.py:pct interpolates between neighbouring order statistics at the zero-based
+    position (n - 1) * p / 100. A p95 over 128 samples and a p95 over 64 are therefore not the
+    same statistic, and a table that prints both without their n invites the comparison anyway.
+    """
+    if not n or n < 1:
+        return None
+    k = (n - 1) * (p / 100.0)
+    lower = int(math.floor(k)) + 1          # 1-indexed neighbour below the interpolation point
+    upper = min(lower + 1, n)
+    return {"n": n, "p": p, "position": k + 1.0, "lower": lower, "upper": upper,
+            "above": n - lower}
+
+
+def _rank_label(n, p):
+    r = percentile_rank(n, p)
+    if not r:
+        return "&mdash;"
+    if r["lower"] == r["upper"]:
+        return "%d of %d" % (r["lower"], n)
+    return "%d-%d of %d" % (r["lower"], r["upper"], n)
+
+
 def _reference_for(res):
     """Reference figures for the GPU under test, and where each came from."""
     models = _gpu_models(res)
@@ -415,6 +587,221 @@ def _attribution(res):
     return att
 
 
+def _g(d, *keys):
+    """Nested get that tolerates a missing branch, so a level assembled by an older probe renders
+    a stated omission instead of raising halfway through the document."""
+    cur = d
+    for k in keys:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(k)
+    return cur
+
+
+def _yes_no(v, yes="yes", no="no", unknown="not reported"):
+    if v is None:
+        return '<span class="badge b-unknown">%s</span>' % esc(unknown)
+    return yes if v else no
+
+
+def render_closed_loop(levels):
+    """The closed-loop sweep, with the sample size and resolved rank beside every percentile."""
+    if not levels:
+        return ""
+    o = ["<h2>Serving performance</h2>",
+         "<p>Throughput is quoted with its latency bound throughout. A throughput figure without "
+         "one can always be improved by making every individual request slower. Each level also "
+         "carries the number of requests behind its percentiles, because a p95 over 64 samples "
+         "and a p95 over 128 are not the same statistic.</p>"]
+    rows = []
+    for l in levels:
+        n = l.get("sample_count")
+        rows.append([l.get("concurrency"), fmt(l.get("output_tokens_per_s"), 0),
+                     fmt(l.get("per_request_output_tokens_per_s"), 1),
+                     fmt(_g(l, "ttft_s", "p50"), 2), fmt(_g(l, "ttft_s", "p95"), 2),
+                     fmt(_g(l, "itl_ms", "p50"), 1),
+                     n if n else "&mdash;", _rank_label(n, 95)])
+    o.append(table(["Concurrent", "Output tok/s", "Per stream", "TTFT p50 (s)", "TTFT p95 (s)",
+                    "ITL p50 (ms)", "Samples (n)", "p95 resolves at"], rows))
+    ns = sorted({l.get("sample_count") for l in levels if l.get("sample_count")})
+    if ns:
+        bits = []
+        for n in ns:
+            r = percentile_rank(n, 95)
+            bits.append("at n=%d between samples %d and %d of %d, leaving %d above it"
+                        % (n, r["lower"], r["upper"], n, r["above"]))
+        o.append('<p class="note">Percentiles use the probe\'s own method: the zero-based position '
+                 '(n - 1) x p / 100, interpolated between the two neighbouring sorted samples. For '
+                 'p95 that resolves %s.%s</p>'
+                 % ("; ".join(bits),
+                    "" if len(ns) < 2 else
+                    " The levels do not all carry the same sample size, so the p95 at one level "
+                    "rests on fewer observations than the p95 at another and its tail is the "
+                    "coarser of the two. Compare them with that in view."))
+    return "".join(o)
+
+
+def _ol_cell(view, value, nd):
+    """One latency percentile from an open-loop level, carrying whatever qualifies it.
+
+    Two qualifications, and they are independent: a voided row is one whose experiment did not
+    happen as named, and a thin row is one whose slowest requests are missing from the sample.
+    """
+    if value is None:
+        return "&mdash;"
+    txt = fmt(value, nd)
+    if open_loop_row_is_voided(view):
+        txt = "<s>%s</s>" % txt
+    if open_loop_percentile_is_lower_bound(view):
+        txt += ' <span class="lb">lower bound</span>'
+    return txt
+
+
+def render_open_loop(views):
+    """The open-loop levels: the only part of this document that can speak about capacity.
+
+    Every rendering decision here exists to stop one of four ways a reader gets a wrong answer:
+    a missing verdict read as a pass, a percentile read off a level whose generator misfired, a
+    latency observation read as a capacity finding, and a percentile read off the fast half of a
+    level that timed out on the slow half.
+    """
+    if not views:
+        return ""
+    # Voided levels are partitioned out first. Every statement below reads either a verdict or a
+    # percentile off its levels, and a voided level supports neither: its arrivals were not the
+    # process it names. It is reported, in its own callout, and nowhere else.
+    voided = [v for v in views if open_loop_row_is_voided(v)]
+    live = [v for v in views if not open_loop_row_is_voided(v)]
+    not_judged = [v for v in live if v["grew"] is None]
+    grew = [v for v in live if v["grew"] is True]
+    capacity = [v for v in grew if v["capacity"] is True]
+    unattributed = [v for v in grew if v["capacity"] is not True]
+    thin = [v for v in live if open_loop_percentile_is_lower_bound(v)]
+    rates = lambda vs: ", ".join(fmt(v["rate"], 2) for v in vs)
+
+    o = ["<h2>Offered load: what happened as requests arrived on their own schedule</h2>",
+         "<p>A closed-loop sweep issues its next request only when a previous one finishes, so it "
+         "throttles itself exactly when a real arrival stream would not and cannot build a queue. "
+         "The levels below are open loop: arrivals follow a Poisson process at a fixed offered "
+         "rate whatever the engine is doing, which is the only arrangement in this tool that can "
+         "answer a question about sustained rate.</p>",
+         "<p>Of %d open-loop level(s): %d were voided before their numbers were read, "
+         "<b>%d reached no verdict</b>, and %d showed latency growing across the level.</p>"
+         % (len(views), len(voided), len(not_judged), len(grew))]
+
+    rows = []
+    for v in views:
+        cls, label, prose = open_loop_verdict(v)
+        why = v["basis"] or (v["capacity_basis"] if v["capacity"] is not None else None)
+        if v["grew"] is None and not why:
+            # A NOT JUDGED cell must never be silent. Absent a basis from the probe, say that.
+            why = "The probe recorded no basis for withholding the verdict."
+        cell = '<span class="badge %s">%s</span><div class="why">%s%s</div>' % (
+            cls, esc(label), esc(prose), (" " + esc(why)) if why else "")
+        frac = v["fraction"]
+        frac_txt = ('<span class="badge b-unknown">not reported</span>' if frac is None
+                    else "%s%%" % fmt(frac * 100, 0))
+        reason = open_loop_percentile_lower_bound_reason(v)
+        if reason:
+            frac_txt += ' <span class="lb">%s</span>' % esc(reason)
+        marks = []
+        if v["generator_kept_up"] is False:
+            marks.append("generator missed its own schedule")
+        if v["truncated"]:
+            marks.append("truncated by the harness")
+        first = ('<span class="badge b-void">VOIDED</span><div class="why">%s</div>'
+                 % esc("; ".join(marks))) if marks else ""
+        rows.append(['<tr class="voided">' if marks else "<tr>",
+                     first, fmt(v["rate"], 2), fmt(v["achieved"], 2), cell,
+                     _yes_no(v["capacity"]), _yes_no(v["generator_kept_up"]),
+                     _yes_no(v["truncated"]), frac_txt,
+                     "&mdash;" if v["censored"] is None else v["censored"]])
+    o.append(_table_with_row_classes(
+        ["", "Target rate (req/s)", "Achieved arrival (req/s)", "Verdict",
+         "Engine queue grew", "Generator kept up", "Truncated", "Completed of offered",
+         "Censored in fit"], rows))
+
+    o.append('<p class="note">Latency growth is a measurement of drift across the level. On its '
+             'own it does not identify a cause: on a machine serving several environments from '
+             'one engine, a co-tenant slowdown produces the same reading with no queue anywhere. '
+             'A capacity claim is written above only where the engine\'s own waiting count grew '
+             'with the latency.</p>')
+
+    lat = []
+    for v in views:
+        l = v["level"]
+        n = l.get("sample_count") or v["fit_n"]
+        lat.append(['<tr class="voided">' if open_loop_row_is_voided(v) else "<tr>",
+                    ('<span class="badge b-void">VOIDED</span>'
+                     if open_loop_row_is_voided(v) else ""),
+                    fmt(v["rate"], 2), n if n else "&mdash;", _rank_label(n, 95),
+                    _ol_cell(v, _g(l, "ttft_s", "p50"), 2),
+                    _ol_cell(v, _g(l, "ttft_s", "p95"), 2),
+                    _ol_cell(v, _g(l, "itl_ms", "p50"), 1),
+                    _ol_cell(v, _g(l, "itl_ms", "p95"), 1),
+                    _ol_cell(v, _g(l, "e2e_s", "p95"), 2)])
+    o.append("<h3>Latency at each offered rate</h3>")
+    o.append(_table_with_row_classes(
+        ["", "Target rate (req/s)", "Samples (n)", "p95 resolves at", "TTFT p50 (s)",
+         "TTFT p95 (s)", "ITL p50 (ms)", "ITL p95 (ms)", "End-to-end p95 (s)"], lat))
+
+    if voided:
+        o.append('<div class="callout crit"><p><b>%d level(s) are voided at %s req/s.</b> Their '
+                 'numbers are struck above and must not be read: a generator that missed its own '
+                 'schedule dispatched a catch-up burst rather than the arrival process the level '
+                 'names, and a level truncated by the harness stopped before the part that would '
+                 'have shown a tail. The row is marked before the numbers, not after.</p></div>'
+                 % (len(voided), rates(voided)))
+    if not_judged:
+        o.append('<div class="callout warn"><p><b>%d level(s) reached no verdict at %s req/s.</b> '
+                 'They measured latencies and cannot say whether those latencies were growing, '
+                 'each for the reason printed in its own row. A level in this state is not a level '
+                 'that passed: its percentiles describe the requests that returned, which on a '
+                 'loaded engine are the fast ones.</p></div>'
+                 % (len(not_judged), rates(not_judged)))
+    if capacity:
+        o.append('<div class="callout crit"><p><b>At %s req/s the engine did not keep up.</b> '
+                 'Latency grew across the level and the engine\'s own waiting count grew with it, '
+                 'which is the pair that makes this a capacity statement rather than a latency '
+                 'observation. Rates at or above the lowest of these are not sustained rates for '
+                 'this deployment.</p></div>' % rates(capacity))
+    if unattributed:
+        o.append('<div class="callout warn"><p><b>At %s req/s latency grew and the cause is not '
+                 'established.</b> Requests got slower through the level; that the offered rate '
+                 'caused it is not shown, because the engine\'s own waiting count either was '
+                 'unavailable or showed no queue. Sizing hardware from these levels would size '
+                 'for something measured but not diagnosed.</p></div>' % rates(unattributed))
+    if thin:
+        o.append('<div class="callout warn"><p><b>Every percentile from %s req/s is a lower '
+                 'bound.</b> Each of those rows names its own reason beside its completion '
+                 'fraction. The requests that did not come back are the ones that waited longest, '
+                 'so what is left is a biased sample of the fast ones and the true percentile is '
+                 'at least the figure shown, possibly far above it.</p></div>'
+                 % rates(thin))
+    if not (not_judged or grew or voided):
+        o.append('<p>Every open-loop level was judged, and in each one per-request latency was '
+                 'flat across the arrival window. A queue that is not growing leaves latency flat '
+                 'however deep the in-flight count is, so these rates were absorbed rather than '
+                 'merely survived. Read the probe\'s own stated sensitivity limit alongside this: '
+                 'the effect gate sits at half the largest value its statistic can take, so a '
+                 'slow ramp can pass it.</p>')
+    return "".join(o)
+
+
+def _table_with_row_classes(headers, rows):
+    """Same table as everywhere else, except each row supplies its own opening <tr>.
+
+    A voided row has to be distinguishable from a valid one by more than the text inside it, and
+    that means a class on the row itself.
+    """
+    o = ['<div class="tw"><table>']
+    o.append("<thead><tr>" + "".join("<th>%s</th>" % h for h in headers) + "</tr></thead><tbody>")
+    for r in rows:
+        o.append(r[0] + "".join("<td>%s</td>" % c for c in r[1:]) + "</tr>")
+    o.append("</tbody></table></div>")
+    return "".join(o)
+
+
 def write_report(res, path, title=None, subtitle=None):
     inv = _probe(res, "inventory")
     torch_p = _probe(res, "torch_compute")
@@ -477,6 +864,13 @@ def write_report(res, path, title=None, subtitle=None):
     if gpus:
         kpis.append(("%d x %s GiB" % (count, fmt((gpus[0].get("memory_total") or 0) / 1024.0, 0)),
                      "VRAM"))
+    # A rate headline may only come from a level that was judged AND not voided. Promoting an
+    # unjudged or voided level to a KPI is the same defect as rendering its verdict as blank.
+    flat = [v for v in _open_loop_views(res)
+            if v["grew"] is False and not open_loop_row_is_voided(v) and v["rate"]]
+    if flat:
+        kpis.append(("%s req/s" % fmt(max(v["rate"] for v in flat), 1),
+                     "highest offered rate with flat latency"))
     A('<div class="kpis">%s</div>' % "".join(
         '<div class="kpi"><div class="v">%s</div><div class="k">%s</div></div>' % (v, esc(k))
         for v, k in kpis))
@@ -664,17 +1058,8 @@ def write_report(res, path, title=None, subtitle=None):
                  "something other than power."))
 
     # ---------------- serving, interconnect, attribution, embedding, accuracy
-    sb = _probe(res, "serve_bench")
-    if sb.get("levels"):
-        A("<h2>Serving performance</h2>")
-        A("<p>Throughput is quoted with its latency bound throughout. A throughput figure without "
-          "one can always be improved by making every individual request slower.</p>")
-        A(table(["Concurrent", "Output tok/s", "Per stream", "TTFT p50 (s)", "TTFT p95 (s)",
-                 "ITL p50 (ms)"],
-                [[l["concurrency"], fmt(l["output_tokens_per_s"], 0),
-                  fmt(l.get("per_request_output_tokens_per_s"), 1),
-                  fmt(l["ttft_s"]["p50"], 2), fmt(l["ttft_s"]["p95"], 2),
-                  fmt(l["itl_ms"]["p50"], 1)] for l in sb["levels"]]))
+    A(render_closed_loop(_closed_loop_levels(res)))
+    A(render_open_loop(_open_loop_views(res)))
     nc = _probe(res, "nccl_allreduce")
     if nc.get("results"):
         rows = sorted(nc["results"], key=lambda r: r["size_bytes"])

@@ -20,11 +20,19 @@ tested.
 A content module supplies:
 
     TITLE          str
+    BASENAME       str, the filename stem the report publishes under
+    VERSION        str, the edition, which the filename carries: <BASENAME>-v<VERSION>.html
     SECTION_ORDER  list of title fragments, in reading order
     build(run_dir, out_dir) -> (figures, data)
     render(figures, data) -> body HTML, sections in authoring order
                    or render(figures, data, manifest=None), to be handed the claims manifest
                    this build already computed instead of computing a second copy of it
+
+BASENAME and VERSION are read by report_stem(), which render_report() calls before build() runs.
+For several editions they were documented here and read nowhere: the caller rebuilt the filename
+from getattr defaults, so a module that declared neither still published, as report.html. Two
+contract fields that nothing reads teach the next author that the contract is a comment, and the
+report that followed went on to hardcode an arrival model the manifest was supposed to declare.
 
 and, to arm the pre-render gate (required unless the caller passes --allow-ungated, see
 run_claims_gate):
@@ -57,6 +65,7 @@ __all__ = [
     "Rendered", "read_manifest", "check_declaration_floor", "KIND_EVIDENCE",
     "check_no_baseline_floor", "NO_BASELINE_MIN_UNIT_BEARING_PCT", "scope_to_document",
     "DOC_CHECKS", "stamp_draft", "stamp_docx_marker", "DRAFT_MARKER", "DRAFT_HEADLINE",
+    "report_basename", "report_version", "report_stem",
 ]
 
 # Gate outcomes. This module reports them; the caller decides what each one costs. In the CLI only
@@ -653,20 +662,107 @@ def run_claims_gate(content, figures, data, out_dir, rendered_html=None,
             "manifest_path": manifest_path, "findings_path": findings_path, "message": msg}
 
 
+# ---- BASENAME and VERSION: the two contract fields the engine used to document and not read ----
+#
+# HOW THE FILENAME IS ACTUALLY DERIVED. A build publishes <BASENAME>-v<VERSION>.html, plus an
+# index.html copy of it. That formula was reassembled at the call site out of getattr defaults,
+# "report" for an absent BASENAME and no version at all for an absent VERSION, so every way of
+# getting the declaration wrong produced a differently named file and not one word about it: a
+# misspelled attribute published as report.html, and an edition nobody bumped published straight
+# over its predecessor. Reading the declarations here is what makes them contract rather than
+# commentary, and keeping the formula here is what stops the name drifting between callers.
+#
+# A stem, not a path. It is joined to the output directory, so a separator or a parent reference
+# in it writes the report somewhere no build log names.
+_STEM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# An edition, not a label: digits and dots, with an optional pre-release or build suffix.
+_VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)*(?:[.+-][A-Za-z0-9.+-]+)?$")
+
+_CONTRACT_REF = "The contract is at the top of gpubench/longform/__init__.py."
+
+
+def report_basename(content, override=None):
+    """The filename stem a report publishes under: the module's BASENAME, or an explicit override.
+
+    `override` is for a caller that lets an operator name the output (the CLI's --basename). It
+    replaces the value, not the obligation to declare one, so a module with no BASENAME is a fault
+    whichever way it is invoked.
+    """
+    if override is not None:
+        value, where = override, "--basename"
+    elif not hasattr(content, "BASENAME"):
+        raise SystemExit(
+            "content module declares no BASENAME. It is the filename stem the report publishes "
+            'under: the engine writes <BASENAME>-v<VERSION>.html. Add BASENAME = "my-report" '
+            "beside TITLE. " + _CONTRACT_REF)
+    else:
+        value, where = content.BASENAME, "BASENAME"
+    if not isinstance(value, str) or not _STEM_RE.match(value):
+        raise SystemExit(
+            "%s = %r is not a filename stem. It has to start with a letter or a digit and hold "
+            "only letters, digits, dot, hyphen and underscore, because it is joined to the output "
+            "directory: a separator, a parent reference or a leading space in it writes the "
+            "report somewhere no build log names." % (where, value))
+    return value
+
+
+def report_version(content):
+    """The edition a report publishes as. It goes in the filename, so it is not decoration."""
+    if not hasattr(content, "VERSION"):
+        raise SystemExit(
+            "content module declares no VERSION. The filename carries the edition, as "
+            "<BASENAME>-v<VERSION>.html, so a new edition cannot quietly overwrite the one before "
+            'it and leave two different documents behind one name. Add VERSION = "1.0" beside '
+            "TITLE. " + _CONTRACT_REF)
+    value = content.VERSION
+    if not isinstance(value, str):
+        raise SystemExit(
+            "VERSION = %r is a %s, not a str. A number cannot carry an edition: 8.10 formats as "
+            '8.1, so the edition after 8.9 publishes on top of it and reads as a step backwards. '
+            'Declare VERSION = "%s".' % (value, type(value).__name__, value))
+    if value[:1] in ("v", "V") and value[1:2].isdigit():
+        raise SystemExit(
+            'VERSION = %r must not carry its own "v". The engine adds one, so this publishes as '
+            '<BASENAME>-v%s.html. Declare VERSION = "%s".' % (value, value, value[1:]))
+    if not _VERSION_RE.match(value):
+        raise SystemExit(
+            "VERSION = %r is not an edition. It has to start with a digit and hold only digits "
+            "and dots, optionally followed by a suffix of letters, digits, dot, plus or hyphen. "
+            "It becomes part of a filename and it is what the changelog and the previous edition "
+            "are matched against." % (value,))
+    return value
+
+
+def report_stem(content, basename=None):
+    """The output filename stem a content module's declarations resolve to.
+
+    Returns "<BASENAME>-v<VERSION>", which is the name reports have always been published under.
+    What changed is that both halves are now read from the module and checked, instead of being
+    defaulted at the call site where a missing declaration was indistinguishable from a deliberate
+    one. VERSION is not overridable: the edition is a property of the content, not of the command
+    that rendered it.
+    """
+    return "%s-v%s" % (report_basename(content, basename), report_version(content))
+
+
 class Rendered(tuple):
-    """(html, figures, data) as ever, carrying the build's claims manifest as `.manifest`.
+    """(html, figures, data) as ever, carrying the build's claims manifest as `.manifest` and the
+    filename stem its own declarations resolve to as `.stem`.
 
     WHY A TUPLE SUBCLASS AND NOT A FOURTH ELEMENT. Callers unpack three values, including content
     modules that drive the engine directly from their own __main__ block, and widening the tuple
     would break every one of them silently at the unpack. The manifest rides along as an attribute
     because exactly one caller wants it: the gate, which must judge the same dict the document was
-    rendered from.
+    rendered from. The stem rides along for the same reason: the caller that writes the files needs
+    the name the engine resolved, and a second derivation somewhere else is a name that can drift.
     """
     manifest = _UNSET
+    stem = None
 
-    def __new__(cls, html, figures, data, manifest=_UNSET):
+    def __new__(cls, html, figures, data, manifest=_UNSET, stem=None):
         self = tuple.__new__(cls, (html, figures, data))
         self.manifest = manifest
+        self.stem = stem
         return self
 
 
@@ -693,11 +789,16 @@ def _render_body(content, figures, data, manifest):
 def render_report(content, run_dir, out_dir=None, warn=None):
     """Build a complete report from a content module and a run directory.
 
-    Returns (html, figures, data), plus `.manifest` on the returned object: claims() is called here
-    and NOWHERE ELSE in a build, so the evidence and the document come out of one call. Writing
-    files is the caller's business; this returns the document so a caller can diff it, lint it, or
-    render it without touching the filesystem.
+    Returns (html, figures, data), plus `.manifest` and `.stem` on the returned object: claims() is
+    called here and NOWHERE ELSE in a build, so the evidence and the document come out of one call,
+    and `.stem` is the filename the module's BASENAME and VERSION resolve to. Writing files is the
+    caller's business; this returns the document so a caller can diff it, lint it, or render it
+    without touching the filesystem.
     """
+    # Before build(). A missing or malformed BASENAME or VERSION is a one-line fix, and a build
+    # that only reports it after the measurements have been reduced is a build people learn to
+    # work around rather than correct.
+    stem = report_stem(content)
     figures, data = content.build(run_dir, out_dir)
     fn = getattr(content, "claims", None)
     # Computed before render() so a renderer can be handed it. Safe in that order because claims()
@@ -706,4 +807,4 @@ def render_report(content, run_dir, out_dir=None, warn=None):
     manifest = fn(figures, data) if callable(fn) else _UNSET
     body = _render_body(content, figures, data, manifest)
     html = assemble(body, content.TITLE, content.SECTION_ORDER, warn=warn)
-    return Rendered(html, figures, data, manifest)
+    return Rendered(html, figures, data, manifest, stem)

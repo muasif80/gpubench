@@ -32,4 +32,25 @@ pdf = ["playwright>=1.40", "pymupdf>=1.23"]
 gpubench = "gpubench.cli:main"
 
 [tool.setuptools]
-packages = ["gpubench", "gpubench.probes", "gpubench.longform", "gpubench.template"]
+packages = [
+    "gpubench",
+    "gpubench.probes",
+    "gpubench.longform",
+    "gpubench.template",
+    "gpubench.template.tests",
+]
+
+# Non-Python files that ship INSIDE the package. setuptools copies only .py files unless a rule
+# like this one names the rest, so without it `pip install .` produced a package whose linter
+# could not load its own data contract: report-outline.yaml and run-schema.json were simply not
+# there. The tar.gz and zip archives were never affected, because those are built by copying the
+# tree and are proven by extracting them again, which is exactly why the installed path went
+# unnoticed for so long.
+#
+# These patterns are a declaration, and a declaration is not evidence. tests/test_packaging.py
+# builds a wheel with this backend and compares its contents against the package directory on
+# disk, so a data file added later without a matching pattern fails a test instead of quietly
+# vanishing from the installed copy.
+[tool.setuptools.package-data]
+"gpubench.template" = ["*.json", "*.md", "*.yaml"]
+"gpubench.template.tests" = ["fixtures/*/*.html", "fixtures/*/*.json"]

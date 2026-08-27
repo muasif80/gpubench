@@ -202,10 +202,54 @@ MODEL_CONTEXT = re.compile(
     r"(?i)\b(?:rtx|gtx|geforce|radeon|quadro|tesla|titan|xeon|ryzen|epyc|threadripper|core|"
     r"nvidia|amd|intel|arc|instinct|blackwell|ada|hopper|ampere|model|series|sm|gen)[\s-]*$")
 
+# Where one line of reading stops. Between two block elements there is no adjacency however little
+# markup separates them, so the stripper puts this character there and the numeral-unit gap, which
+# is whitespace only, cannot cross it. It is NUL because NUL is not whitespace to `\s`: every other
+# separator character in the C0 range is, and a "boundary" the gap can step over is not a boundary.
+BLOCK_BOUNDARY = "\x00"
+BLOCK_TAG = re.compile(
+    r"(?is)</?(?:p|div|section|article|header|footer|main|aside|nav|figure|figcaption|h[1-6]|"
+    r"ul|ol|li|dl|dt|dd|table|thead|tbody|tfoot|tr|td|th|caption|colgroup|col|blockquote|pre|"
+    r"hr|br|details|summary|dialog|form|fieldset|legend|address|body|html|head|option|optgroup|"
+    # SVG text carries its own boundaries. Every figure in a report of this kind draws its axis
+    # with one <text> per tick, and a reader sees five separate labels. Without these the removal
+    # of inline markup glues them into one string: "0%25%50%75%100%" was reported as a numeral of
+    # 0 followed by the unit "%25%50%75%100%", and "012344 KiB10 KiB20 KiB" as one figure. Both
+    # were errors on the real document, and both are the same mistake as the paragraph boundary,
+    # made inside a chart instead of a page.
+    r"svg|g|text|tspan|textPath|foreignObject|desc|"
+    r"select|textarea|video|audio|iframe|canvas)\b[^>]*>")
+
+# The gap between a numeral and its unit. A RUN of whitespace, not one character, because the
+# markup between them has already been removed and what a reader sees as "4414 W" can arrive here
+# as "4414" plus a newline plus the indentation of the next inline element. It stops at
+# BLOCK_BOUNDARY, which is not whitespace, so nothing joins across a paragraph or a table cell.
 UNIT_CANDIDATE = re.compile(
-    "(?<![\\w.])(" + _NUMERAL + ")(\\s|&nbsp;|\u00a0)?"
+    "(?<![\\w.])(" + _NUMERAL + ")(\\s*)"
     r"([A-Za-z\u00b5\u03bc]{1,12}(?:/[A-Za-z]{1,4})?|%)(?![A-Za-z/])")
 ANY_NUMERAL = re.compile(r"(?<![\w.])(" + _NUMERAL + r")")
+
+# Units an English sentence spells out. "47314 tokens per second" and "96 concurrent users" read as
+# measurements to every human being, and neither was unit-bearing: "tokens" and "concurrent" are
+# not unit-shaped, so both numerals fell into the BARE pool, where the floor carries slack and no
+# individual miss was ever named. A fabricated figure spelled this way therefore shipped with no
+# finding at all. Each phrase maps to the printed unit it means, so a claim recorded in tok/s
+# covers a figure printed as "tokens per second"; a phrase with no unit of its own keeps its own
+# words as the unit, which is dimensionless and reads correctly in a finding.
+SPELLED_UNIT_PHRASES = (
+    (r"tokens?\s+per\s+second", "tok/s"),
+    (r"requests?\s+per\s+second", "req/s"),
+    (r"embeddings?\s+per\s+second", "emb/s"),
+    (r"images?\s+per\s+second", "img/s"),
+    (r"frames?\s+per\s+second", "fps"),
+    (r"(?:queries|samples|operations|jobs|documents|files|steps)\s+per\s+"
+     r"(?:second|minute|hour)", ""),
+    (r"(?:tokens?|requests?|users?|images?)\s+per\s+(?:minute|hour|day)", ""),
+    (r"concurrent\s+(?:users?|requests?|sessions?|streams?|clients?)", ""),
+)
+SPELLED_UNIT_SCANNERS = tuple(
+    (re.compile("(?i)(?<![\\w.])(" + _NUMERAL + r")(\s*)(" + phrase + r")\b"), canonical)
+    for phrase, canonical in SPELLED_UNIT_PHRASES)
 
 # A thousands separator printed as a space or a non-breaking space. "9 526.6 tok/s" reads as
 # 9,526.6 to a human and used to reach the gate as the two numerals 9 and 526.6, so the gate
@@ -411,18 +455,53 @@ def objects(m: dict, key: str) -> list:
 # rendered-document text and numerals
 
 
+def strip_to_visible(html: str) -> str:
+    """Tags out, character references decoded, block boundaries marked. The reader's text.
+
+    THREE THINGS HAPPEN HERE AND EACH ONE CLOSED A HOLE.
+
+    INLINE MARKUP IS REMOVED RATHER THAN SPACED. The old stripper turned every tag into a space,
+    so "4414 <b>W</b>" became "4414  W" with two spaces where the numeral scanner allowed at most
+    one, and the numeral left A5's jurisdiction entirely. "<b>4414 W</b>" was checked and
+    "4414 <b>W</b>" was not, which is a distinction no author intends and both spellings are
+    ordinary HTML. Worse, the unit-bearing COUNT did not rise, so the document went on reporting
+    100% of unit-bearing numerals traced while the denominator quietly shrank. A coverage figure
+    whose denominator the document can move is not a coverage figure. A reader sees no space where
+    an inline tag was, so neither does this.
+
+    BLOCK TAGS BECOME A SENTINEL. Removing the markup must not glue a numeral ending a paragraph
+    to a unit-like word opening the next, or to the next table cell. BLOCK_BOUNDARY is not
+    whitespace, so the whitespace-only gap the numeral scanners allow can never cross one.
+
+    CHARACTER REFERENCES ARE DECODED. "&#57;&#44;&#53;&#50;&#54;&#46;&#54; tok/s" reads to a human
+    as 9,526.6 tok/s and reached the gate as the seven bare numerals 57 44 53 50 54 46 54: the
+    digits the gate read were not the digits the reader read, which is the whole failure mode this
+    file exists to prevent. Decoding happens AFTER the tags come out, so an escaped "&lt;b&gt;" is
+    text on the page and not a tag to strip.
+
+    WHICH CHECK READS WHICH FORM, AND WHY. This function returns the DECODED text, because every
+    numeral check has to see what the reader sees. F1 in check_render deliberately does NOT use it:
+    it needs the form where an entity is still visible after one decode pass, since that is what a
+    double escape looks like. Reading the decoded text there would report nothing (the entity is
+    gone); reading the raw source there would report a correctly escaped "&amp;" as a leak. One
+    decode, then look, is the only reading that separates the two.
+    """
+    body = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html)
+    body = BLOCK_TAG.sub(" " + BLOCK_BOUNDARY + " ", body)
+    return html_unescape(re.sub(r"(?s)<[^>]+>", "", body))
+
+
 def visible_text(html: str) -> str:
     """The text a reader can see, plus the attribute values they can see.
 
-    Mirrors the F1 stripper below (script and style bodies out, then tags out, keeping the text
-    between them) so both checks judge the same document, with one deliberate addition: the values
-    of title=, alt= and aria-label=. SVG <title> tooltips need nothing special because they are
-    text between tags, but a number hidden in an attribute is invisible to a tag-stripper, and the
-    omission attack put one there.
+    The values of title=, alt= and aria-label= are in scope on purpose. SVG <title> tooltips need
+    nothing special because they are text between tags, but a number hidden in an attribute is
+    invisible to a tag-stripper, and the omission attack put one there.
     """
     body = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html)
-    attrs = " | ".join(VISIBLE_ATTRS.findall(body))
-    return re.sub(r"(?s)<[^>]+>", " ", body) + " | " + attrs
+    attrs = (" %s " % BLOCK_BOUNDARY).join(
+        html_unescape(v) for v in VISIBLE_ATTRS.findall(body))
+    return strip_to_visible(html) + " %s " % BLOCK_BOUNDARY + attrs
 
 
 def printed_value(token: str) -> float | None:
@@ -462,8 +541,19 @@ def attached_unit_is_real(text: str, start: int, numeral: str, unit: str, except
     return True
 
 
-def unit_bearing_numerals(text: str, attached_exceptions=()) -> list[tuple[int, int, str, str]]:
-    """(start, end, numeral, unit) for every numeral printed with a unit.
+def printed_token(numeral: str, unit: str) -> str:
+    """The numeral and its unit as one string, for allowance matching and coverage grouping."""
+    return numeral + (" " if " " in unit else "") + unit
+
+
+def unit_bearing_numerals(text: str, attached_exceptions=()) -> list[tuple]:
+    """(start, end, numeral, unit, joined) for every numeral printed with a unit.
+
+    `joined` says the numeral and its unit were separated by more than one whitespace character,
+    which is what inline markup between them collapses to. Those numerals were invisible to this
+    scanner until the stripper started removing inline tags, and the count of them is reported in
+    the coverage line: widening jurisdiction silently is how a denominator moves without anyone
+    noticing, so the change says how much it took in.
 
     The unit is recognised by shape rather than from a list, because a list of units is an
     opt-out by omission: whatever an author forgot to add became a numeral with no unit, and A5
@@ -489,12 +579,34 @@ def unit_bearing_numerals(text: str, attached_exceptions=()) -> list[tuple[int, 
         if not separator and len(token) == 1 and not attached_unit_is_real(
                 text, m.start(), numeral, token, attached_exceptions):
             continue
-        out.append((m.start(), m.end(), numeral, token))
+        # A multi-letter token glued to a numeral with NO gap must be a unit we actually know.
+        #
+        # unit_of accepts a short capitalised token on the reasoning that English words following a
+        # numeral are lowercase. That held while inline markup became a space. It stopped holding
+        # the moment markup started being removed outright, which is the fix directly above this
+        # one: a contents entry written "<span>22</span>The embedding service" now reaches here as
+        # "22The", and "The" is short, capitalised, and not a unit in any sentence ever written.
+        # Reported as an error on the real document, which is how it was found.
+        #
+        # The capital heuristic keeps its job wherever a reader can see a gap, because that is
+        # where an author actually writes a unit. With no gap at all the evidence is much weaker,
+        # so it has to be a unit the tool can name rather than one it is guessing at.
+        if not separator and len(token) > 1 and token not in PRINTED_UNIT and "/" not in token:
+            continue
+        out.append((m.start(), m.end(), numeral, token, len(separator) > 1))
         taken.add(m.start())
+    for rx, canonical in SPELLED_UNIT_SCANNERS:
+        for m in rx.finditer(text):
+            if m.start() in taken:
+                continue
+            unit = canonical or re.sub(r"\s+", " ", m.group(3).strip().lower())
+            out.append((m.start(), m.end(), m.group(1), unit, len(m.group(2)) > 1))
+            taken.add(m.start())
     for m in ANY_NUMERAL.finditer(text):
         numeral = m.group(1)
         if numeral[0] in CURRENCY_MARKS and m.start() not in taken:
-            out.append((m.start(), m.end(), numeral, numeral[0]))
+            out.append((m.start(), m.end(), numeral, numeral[0], False))
+            taken.add(m.start())
     out.sort(key=lambda item: item[0])
     return out
 
@@ -522,8 +634,14 @@ def merge_space_groups(text: str) -> tuple[str, list]:
 
 
 def context_of(text: str, start: int, end: int, width: int = 30) -> str:
-    """The printed numeral with enough of its sentence to find it in the document."""
-    return re.sub(r"\s+", " ", text[max(0, start - width):end + width]).strip()
+    """The printed numeral with enough of its sentence to find it in the document.
+
+    The block-boundary sentinel is printed as " / " rather than dropped: a context that silently
+    spans two paragraphs reads like one sentence and sends the author looking for text that is not
+    there.
+    """
+    window = text[max(0, start - width):end + width].replace(BLOCK_BOUNDARY, " / ")
+    return re.sub(r"\s+", " ", window).strip(" /").strip()
 
 
 def round_trips(numeral: str, unit: str, claims: list[tuple[str, float, str | None]]) -> str | None:
@@ -1741,10 +1859,14 @@ def check_table_cells(m: dict, html: str, f: Findings) -> None:
         cells = [(k, v, u) for k, v, u in cells if v is not None]
         stray = []
         for inner in located[table_id]:
-            text = re.sub(r"(?s)<[^>]+>", " ", inner)
-            for start, end, numeral, unit in unit_bearing_numerals(text):
+            # The same stripper A5 uses, and for the same reason: a cell separated from its unit by
+            # inline markup, or a value written with character references, has to read here the way
+            # it reads on the page. The block sentinel is what keeps one cell's numeral from
+            # pairing with the next cell's word.
+            text = strip_to_visible(inner)
+            for start, end, numeral, unit, _joined in unit_bearing_numerals(text):
                 if round_trips(numeral, unit, cells) is None:
-                    stray.append("%s%s" % (numeral, unit))
+                    stray.append(printed_token(numeral, unit))
         if stray:
             unique = sorted(set(stray))
             f.warn(
@@ -1807,7 +1929,20 @@ class Allowance:
             self.hits += 1
             return True
         if self.context is not None:
-            for m in self.context.finditer(window):
+            # Matched against the window with block boundaries rendered as ordinary spaces.
+            #
+            # An author writes a context_pattern against the sentence they can see, and BLOCK_BOUNDARY
+            # is an internal marker they have no reason to know exists. Once inline markup started
+            # being removed and SVG ticks became separate elements, patterns written with \s+ stopped
+            # matching text that now reads "Memory \x00 128 GiB DDR5", and five allowances silently
+            # exempted nothing. Silent is the problem: an allowance that stops matching does not
+            # announce itself, it just lets a number become an error somewhere else.
+            #
+            # Substituted one character for one character so every offset in the window still lines
+            # up, which is what lets the span test below decide whether the match actually covers
+            # this numeral rather than merely sitting near it.
+            plain = window.replace(BLOCK_BOUNDARY, " ")
+            for m in self.context.finditer(plain):
                 if m.start() <= offset < m.end():
                     self.hits += 1
                     return True
@@ -1935,9 +2070,11 @@ def check_coverage(m: dict, rendered: Path | None, f: Findings) -> None:
     unit_hits = unit_bearing_numerals(text, attached_exceptions)
     uncovered: dict = {}
     covered = 0
+    joined = 0
     covered_by: dict = {}
-    for start, end, numeral, unit in unit_hits:
-        token = numeral + unit
+    for start, end, numeral, unit, was_joined in unit_hits:
+        joined += 1 if was_joined else 0
+        token = printed_token(numeral, unit)
         context = context_of(text, start, end)
         by = round_trips(numeral, unit, claims)
         if by is not None:
@@ -1971,7 +2108,7 @@ def check_coverage(m: dict, rendered: Path | None, f: Findings) -> None:
     total = len(unit_hits)
     pct = 100.0 * covered / total if total else 100.0
     f.coverage.update({"unit_bearing": pct, "unit_bearing_total": total,
-                       "unit_bearing_covered": covered})
+                       "unit_bearing_covered": covered, "markup_joined": joined})
 
     # A shortfall against the floor is an error; a shortfall the manifest deliberately allowed for
     # is a warning, so lowering the floor does not make the uncovered numerals disappear from the
@@ -2004,9 +2141,9 @@ def check_coverage(m: dict, rendered: Path | None, f: Findings) -> None:
             % (sum(len(v) for v in uncovered.values()), pct, floor_unit),
         )
 
-    unit_starts = {start for start, _e, _n, _u in unit_hits}
+    unit_starts = {hit[0] for hit in unit_hits}
     bare_total = bare_covered = 0
-    bare_examples: dict = {}
+    bare_uncovered: dict = {}
     for match in ANY_NUMERAL.finditer(text):
         if match.start() in unit_starts:
             continue
@@ -2016,15 +2153,39 @@ def check_coverage(m: dict, rendered: Path | None, f: Findings) -> None:
         if (round_trips(numeral, "", claims) is not None
                 or allowed(numeral, numeral, match.start(), match.end())):
             bare_covered += 1
-        elif len(bare_examples) < 12:
-            bare_examples.setdefault(numeral, context)
+        else:
+            bare_uncovered.setdefault(numeral, []).append(context)
     bare_pct = 100.0 * bare_covered / bare_total if bare_total else 100.0
-    f.coverage.update({"bare": bare_pct, "bare_total": bare_total, "bare_covered": bare_covered})
+    f.coverage.update({"bare": bare_pct, "bare_total": bare_total, "bare_covered": bare_covered,
+                       "bare_uncovered_distinct": len(bare_uncovered)})
     # An explicitly declared floor is a promise the author made, so breaking it blocks, at any
     # sample size. The default floor is a warning, and it used to be 0.0: the branch choosing
     # between error and warn sat behind `bare_pct < 0.0`, a condition no percentage can meet, so
     # it was unreachable code that reads in a diff exactly like a check.
     applies = bare_declared or bare_total >= DEFAULT_BARE_MIN_SAMPLE
+
+    # EVERY UNCOVERED BARE NUMERAL IS NAMED, the way A5 names an uncovered unit-bearing one. It
+    # used to report a percentage and five examples, and nothing else, so a fabricated figure whose
+    # unit an English sentence spells out ("47314 tokens per second", "96 concurrent users") landed
+    # in a pool of a thousand numerals carrying a hundred and fifty of legitimate slack and
+    # produced NO FINDING AT ALL: the aggregate moved by a tenth of a point and no line of output
+    # said which numeral it was. An aggregate is not a check on any individual number. These are
+    # warnings and the floor is still what blocks, because a document legitimately prints counts,
+    # dates and section numbers; the point is that an author can now see WHICH numerals are
+    # unaccounted for instead of only how many. They are held to the same jurisdiction as the floor
+    # itself: a percentage over a handful of numerals is not a measurement, so neither is a list of
+    # them worth interrupting for, unless the manifest declared a floor and made it a promise.
+    if applies and bare_uncovered:
+        for numeral, contexts in bare_uncovered.items():
+            f.warn(
+                "A6",
+                "the document prints the bare numeral %s, which matches no claim value at that "
+                "precision and no coverage.allow pattern. It is unit-bearing to a reader if the "
+                "sentence around it names the unit. Context: %s"
+                % (numeral, " // ".join(contexts[:2])
+                   + (" (+%d more)" % (len(contexts) - 2) if len(contexts) > 2 else "")),
+                numeral=numeral, occurrences=len(contexts),
+            )
     if applies and bare_pct + 1e-9 < floor_bare:
         report_at = f.error if bare_declared else f.warn
         report_at(
@@ -2034,7 +2195,8 @@ def check_coverage(m: dict, rendered: Path | None, f: Findings) -> None:
                " this manifest declares" if bare_declared else
                " that applies when a manifest declares none; declare "
                "coverage.min_bare_numeral_pct to hold this document to a floor of its own",
-               "; ".join("%s in %r" % (k, v) for k, v in list(bare_examples.items())[:5])),
+               "; ".join("%s in %r" % (k, v[0])
+                         for k, v in list(bare_uncovered.items())[:5])),
         )
 
 
