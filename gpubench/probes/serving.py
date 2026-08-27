@@ -388,6 +388,37 @@ QUEUE_GROWTH_MIN_COMPLETION_FRACTION = 0.70
 GENERATOR_FIDELITY_FRACTION = 0.10
 
 
+def dispatch_floor_s(samples=40):
+    """What one arrival costs this host to dispatch, measured rather than assumed.
+
+    The fidelity budget below is a fraction of the mean inter-arrival, and at high rates it asks
+    for a precision the harness itself cannot deliver: at rate 40 the budget is 2.5 ms while a
+    thread creation plus start plus the lock costs a comparable amount on Windows. A budget smaller
+    than the cost of obeying it is not a budget. It makes the verdict a coin flip on a loaded
+    machine, and it fails toward NOT JUDGED, so a level the harness could not schedule faithfully
+    is indistinguishable from one nobody asked about.
+
+    Measured here rather than guessed, because it is a property of the host and not of the code:
+    the sleep overshoot the dispatcher is up against, plus the thread work it does inside the
+    window that H9 deliberately made visible. The median is used so one scheduling hiccup during
+    calibration does not raise the floor for the whole level.
+    """
+    costs = []
+    for _ in range(samples):
+        t0 = time.perf_counter()
+        time.sleep(0.0005)
+        t = threading.Thread(target=lambda: None)
+        t.daemon = True
+        t.start()
+        costs.append(max(0.0, (time.perf_counter() - t0) - 0.0005))
+        t.join()
+    # The p95, not the median, because the quantity this floors is itself a p95 deviation.
+    # Flooring a tail statistic with a central one compares two different things and lets the
+    # tail of the harness's own cost be read as the engine's arrival jitter.
+    costs.sort()
+    return costs[min(len(costs) - 1, int(round(0.95 * (len(costs) - 1))))]
+
+
 def level_seed(base_seed, level_index):
     """The seed one level of a sweep actually draws from.
 
@@ -1213,7 +1244,13 @@ def run_level(args, concurrency, total_requests, in_tok=None, out_tok=None,
         lateness_s = [d for d in deviations_s if d > 0]
         abs_dev = [abs(d) for d in deviations_s]
         mean_gap = (1.0 / rate) if rate else None
-        fidelity_budget = (mean_gap * GENERATOR_FIDELITY_FRACTION) if mean_gap else None
+        # Floored at what this host can actually deliver. Without the floor the budget at rate 40 is
+        # 2.5 ms against a Windows timer tick, so the same level passes and fails on alternate runs
+        # and the verdict says more about machine load than about the engine. Both numbers are
+        # recorded, so a reader can see when the floor rather than the fraction decided the budget.
+        timer_floor = dispatch_floor_s()
+        fraction_budget = (mean_gap * GENERATOR_FIDELITY_FRACTION) if mean_gap else None
+        fidelity_budget = max(fraction_budget, timer_floor) if fraction_budget else None
         dev_p95 = pct(abs_dev, 95) if abs_dev else None
         # Span against span is kept, as its own field, because it answers a different question:
         # whether the level as a whole finished on the clock. It cannot answer the fidelity
@@ -1335,6 +1372,11 @@ def run_level(args, concurrency, total_requests, in_tok=None, out_tok=None,
                           % (GENERATOR_FIDELITY_FRACTION * 100.0)),
                 "p95_abs_deviation_ms": (dev_p95 * 1000.0) if dev_p95 is not None else None,
                 "budget_ms": (fidelity_budget * 1000.0) if fidelity_budget else None,
+                "budget_from_fraction_ms": (fraction_budget * 1000.0) if fraction_budget else None,
+                "host_dispatch_floor_ms": timer_floor * 1000.0,
+                "budget_set_by": ("the host dispatch cost, which exceeds what the fraction asks for"
+                                  if fraction_budget and timer_floor > fraction_budget
+                                  else "the fraction of the mean inter-arrival"),
                 "mean_inter_arrival_ms": (mean_gap * 1000.0) if mean_gap else None,
                 "max_abs_deviation_ms": (max(abs_dev) * 1000.0) if abs_dev else None,
                 "mean_signed_deviation_ms": (statistics.fmean(deviations_s) * 1000.0

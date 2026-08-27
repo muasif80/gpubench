@@ -522,6 +522,18 @@ class TestTheFixtureIsPublishable(ArticleCase):
     """A baseline that already carries findings cannot show that an attack introduced one."""
 
     def test_the_synthetic_report_verifies_and_ships(self):
+        # A first-ever build has no previous edition to measure its declaration floor against, and
+        # the gate now says so out loud instead of passing in silence over a floor it never
+        # checked. That NO BASELINE warning is the one and only thing between this fixture and a
+        # clean sheet, so it is named here rather than tolerated in a loosened count below.
+        first = self.article()
+        self.assertEqual(first.rc, 0, first.out)
+        self.assertEqual(sorted(i["check"] for i in first.findings()), ["A10"], first.findings())
+        self.assertIn("NO BASELINE", first.out)
+
+        # The same build again, with the first edition left on disk as the baseline. Now nothing at
+        # all is outstanding, which is the property this class exists to establish.
+        self.clear_out(keep_manifest=True)
         b = self.article()
         self.assertEqual(b.rc, 0, b.out)
         self.assertTrue(b.report_exists())
@@ -679,7 +691,20 @@ class TestWeakeningAttacks(ArticleCase):
         self.clear_out()
         shrunk = self.article(extra=SHRINK)
         self.assertNotEqual(shrunk.rc, 0, shrunk.out)
-        self.assertEqual(shrunk.checks("A10"), [], "this run deliberately has no baseline")
+        # Nothing A10 says here may rest on a comparison with a previous edition, because there is
+        # not one: every A10 finding on this run is marked baseline False. What it no longer does
+        # is go quiet in that state. It says the floor could not be checked, and it holds the
+        # document to a coverage floor of its own instead, which is a second guard that needs no
+        # baseline either. The assertion that used to stand here was "A10 says nothing at all",
+        # which would now read as a silence this build does not have.
+        a10 = shrunk.checks("A10")
+        self.assertTrue(a10, "a missing baseline has to be stated, not passed over: %s"
+                        % shrunk.findings())
+        self.assertEqual([i.get("baseline") for i in a10], [False] * len(a10),
+                         "no A10 finding on this run may claim to have compared anything: %s" % a10)
+        self.assertIn("NO BASELINE", shrunk.messages("A10"),
+                      "a floor that could not be checked has to say so, or silence reads as a pass")
+        # and the document check, which needs no baseline at all
         self.assertTrue(shrunk.checks("A5", "error"))
         self.assertNothingPublished(shrunk)
 
@@ -721,7 +746,11 @@ class TestWeakeningAttacks(ArticleCase):
         self.clear_out()
         legacy = self.article("--allow-ungated", manifest_attr="CLAIMS_MANIFEST",
                               claims_attr="_claims")
-        self.assertEqual(legacy.rc, 0, legacy.out)
+        # The escape writes a file, and the exit code is the only thing a pipeline reads, so it
+        # cannot be the same code a checked report exits with. DRAFT_EXIT means "there is a file
+        # and it is not publishable", which is the whole promise in this test's name.
+        self.assertNotEqual(legacy.rc, 0, legacy.out)
+        self.assertEqual(legacy.rc, cli.DRAFT_EXIT, legacy.out)
         self.assertTrue(legacy.report_exists())
         for name in (legacy.STEM + ".html", "index.html", "method-primer.html"):
             self.assertIn(longform.DRAFT_MARKER, legacy.read(name),
@@ -740,6 +769,12 @@ class TestWeakeningAttacks(ArticleCase):
         supplied with a phrase that merely SOUNDS like provenance, A9 blocks. As supplied with a
         source a reader really could open, the declaration floor blocks it, because the claim now
         rests on weaker evidence than the previous edition's with no changelog row saying so.
+
+        AND B1 ITSELF NO LONGER HONOURS THE RELABEL. A claim that carries its own inputs and its
+        own formula is recomputed whatever the generator chose to call it, so the escape this
+        attack was built on is closed at the first guard as well as the second. This assertion used
+        to record the escape as real ("the relabel really does exempt it from recomputation") and
+        leaned on A9 alone to catch it; it now records that the exemption is gone.
         """
         derived = self.article(extra=DERIVED_THAT_DISAGREES)
         self.assertNotEqual(derived.rc, 0, derived.out)
@@ -753,8 +788,12 @@ class TestWeakeningAttacks(ArticleCase):
         self.clear_out()
         laundered = self.article(extra=relabelled_kind("engineering estimate"))
         self.assertNotEqual(laundered.rc, 0, laundered.out)
-        self.assertEqual(laundered.checks("B1"), [],
-                         "the relabel really does exempt it from recomputation")
+        self.assertTrue(laundered.checks("B1", "error"),
+                        "the relabel must no longer exempt the claim from recomputation: %s"
+                        % laundered.findings())
+        self.assertIn("10.7", laundered.messages("B1"), "the arithmetic is still the finding")
+        self.assertIn("free choice of the generator", laundered.messages("B1"),
+                      "and the finding has to name the relabel as the thing that did not work")
         self.assertTrue(laundered.checks("A9", "error"), laundered.findings())
         self.assertIn("redeemable", laundered.messages("A9"))
         self.assertNothingPublished(laundered)
@@ -1159,7 +1198,13 @@ class TestArrivalAttacks(unittest.TestCase):
                                       "measured_at": "2026-08-25T11:05:00Z",
                                       "label": "aggregate throughput"}},
             "levels": levels,
-            "gate": {"passed": True, "cases_published": True, "window_run": "primary"},
+            # G3 treats a gate result with no readable artefact as unfalsifiable and now blocks on
+            # it, so a manifest built in memory has to say out loud that there is no file to read.
+            # The waiver downgrades G3 to a warning; it does not remove the finding, which is why
+            # the arrival checks below can still be read against a clean exit code.
+            "gate": {"passed": True, "cases_published": True, "window_run": "primary",
+                     "artifact_waiver": "synthetic fixture: this manifest describes no run that "
+                                        "exists on disk"},
         }
 
     def run_verify_cli(self, manifest, name="claims.json"):
@@ -1526,7 +1571,9 @@ class TestSelfDefeat(ArticleCase):
         --allow-ungated: a gate that failed and a gate that was never armed are different problems.
         """
         draft = self.article("--no-verify", total="33.0")
-        self.assertEqual(draft.rc, 0, draft.out)
+        # A stamp a reader can see is not enough on its own: a pipeline reads the exit code and
+        # nothing else, so a suppressed error exits DRAFT_EXIT and never 0.
+        self.assertEqual(draft.rc, cli.DRAFT_EXIT, draft.out)
         self.assertTrue(draft.report_exists())
         self.assertIn("SKIPPED", draft.out)
         self.assertIn("B1", draft.out, "the log must name the check it overrode")
