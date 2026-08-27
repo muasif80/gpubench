@@ -109,6 +109,10 @@ class PlinkTransport(SshTransport):
         self.hostkey = hostkey
 
     def _base(self):
+        # NOTE for anyone tempted to add "-keepalive 15" here: plink rejects it with
+        # 'unknown option "-keepalive"'. PuTTY carries keepalives in a saved session, not on the
+        # command line. The dead-link problem it would solve is real and is handled by the caller
+        # instead, by sizing the timeout to the work and retrying: see run_serving.
         args = [self.plink, "-batch", "-ssh", "-pw", self.password]
         if self.hostkey:
             args += ["-hostkey", self.hostkey]
@@ -361,7 +365,19 @@ def run_serving_repeats(tp, repeats=3, **kw):
         agg = {}
         for r in runs:
             for l in r["levels"]:
-                agg.setdefault(l["concurrency"], []).append(l["output_tokens_per_s"])
+                # Keyed on what actually identifies a level, not on concurrency alone. An open-loop
+                # level has no concurrency by design and records None, so keying on it collapsed
+                # every rate of a sweep into one bucket: four rates across three repeats produced a
+                # single bucket of twelve, and its 75.7% spread between 6.4 and 62.4 tok/s would
+                # have been published as run-to-run REPRODUCIBILITY. That is a cross-rate range
+                # wearing the name of a variance, and it is the kind of number a reader acts on.
+                arr = l.get("arrival") or {}
+                rate = arr.get("target_rate_req_s")
+                if arr.get("model", "").startswith("open_loop") and rate is not None:
+                    key = "rate=%g" % rate
+                else:
+                    key = l.get("concurrency")
+                agg.setdefault(key, []).append(l["output_tokens_per_s"])
         spread = {}
         for c, vals in agg.items():
             m = sum(vals) / len(vals)
