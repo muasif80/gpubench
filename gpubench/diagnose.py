@@ -5,15 +5,15 @@ WHY THIS MODULE EXISTS.
 
 The probes in this tool measure well. What they did not do was ACCOUNT for what they measured. A
 previous run recorded that the serving engine's prefix-cache counters read zero, which is true and
-useful, and then stopped. Explaining that reading -- separating "the cache was consulted and missed"
-from "the cache was never running" from "the counter is broken" -- took a person reading engine
+useful, and then stopped. Explaining that reading (separating "the cache was consulted and missed"
+from "the cache was never running" from "the counter is broken") took a person reading engine
 source inside a container for the better part of a day. All three look identical from outside, and
 they license completely different recommendations: one of them turned a change previously described
 as "the cheapest possible win" into something needing a maintenance window and carrying real risk.
 
 That investigation was mechanical. Every step of it was a rule over data the tool either already had
 or could fetch in one request. So it belongs here, where it runs every time, for free, on every
-machine -- rather than being rediscovered by whoever next notices an odd number.
+machine, rather than being rediscovered by whoever next notices an odd number.
 
 THE THREE RULES THIS MODULE FOLLOWS.
 
@@ -214,7 +214,7 @@ def d_attribution(res, attribution=None):
             "Attribution is impossible: the modelled components exceed the measured step.",
             "A negative residual means at least one input is wrong, not that the machine is fast. "
             "The most common cause by a wide margin is using the checkpoint size on disk as the "
-            "weight bytes instead of the bytes the engine actually made resident -- a checkpoint can "
+            "weight bytes instead of the bytes the engine actually made resident: a checkpoint can "
             "contain towers a deployment never loads. The second most common is a bandwidth roof "
             "measured on a buffer small enough to sit in cache.",
             ev,
@@ -473,8 +473,234 @@ def d_sampling(res):
                    "weighted by the number of samples behind it.", ev)
 
 
+def _open_loop_levels(res):
+    """The open-loop levels of the serving sweep, with the fields the two rules below read.
+
+    A level is open loop when it says so, not when it happens to have a rate: closed-loop levels
+    have no arrival process and nothing here applies to them.
+    """
+    sb = _probe(res, "serve_bench")
+    out = []
+    for lv in (sb.get("levels") or []):
+        arr = lv.get("arrival") or {}
+        if arr.get("model") != "open_loop_poisson":
+            continue
+        out.append({
+            "rate": arr.get("target_rate_req_s"),
+            # The new name, falling back to the deprecated one so a document written by an older
+            # probe is still read rather than silently treated as having no verdict.
+            "grew": (arr["latency_grew_over_the_level"]
+                     if "latency_grew_over_the_level" in arr else arr.get("fell_behind")),
+            "basis": (arr.get("latency_grew_over_the_level_basis")
+                      or arr.get("fell_behind_basis")),
+            "capacity": arr.get("engine_did_not_keep_up"),
+            "capacity_basis": arr.get("engine_did_not_keep_up_basis"),
+            "generator_kept_up": arr.get("generator_kept_up"),
+            "truncated": arr.get("truncated_by_harness_limit"),
+            "dispatched": arr.get("requests_dispatched"),
+            "ok": lv.get("requests_ok"),
+            "unaccounted": lv.get("requests_unaccounted"),
+            "censored": _f(arr, "queue_growth", "n_censored"),
+            "fraction": _f(arr, "queue_growth", "completion_fraction"),
+            "floor": _f(arr, "queue_growth", "completion_fraction_floor"),
+            "engine_queue_grew": _f(arr, "queue_growth", "engine_side", "engine_queue_grew"),
+        })
+    return out
+
+
+def _rates(levels):
+    return [lv["rate"] for lv in levels]
+
+
+def d_open_loop_verdict(res):
+    """Did the engine keep up, and is that even a question this run asked?
+
+    The open-loop probe produces the only verdict in this tool that a capacity decision would rest
+    on, and until this rule existed nothing downstream read it: a source-level count over the
+    report and the diagnostics found zero occurrences of fell_behind, generator_kept_up or
+    queue_growth. A production open-loop run therefore published a report that could not say
+    whether the engine kept up.
+
+    Three states, and they are not interchangeable:
+      latency did not grow            -> nothing here says the engine was short of capacity
+      latency grew, engine queue too  -> a capacity limit at that offered rate
+      latency grew, engine queue flat -> something slowed every request; the offered rate is NOT
+                                         shown to be the cause, and this engine may be shared
+      not judged                      -> loud, first-class, and never rendered as an all-clear
+    """
+    sb = _probe(res, "serve_bench")
+    levels = _open_loop_levels(res)
+    if not sb:
+        return finding("open-loop", "unknown", "No serving benchmark in this run.",
+                       "Nothing measured how requests arrived, so nothing can say whether the "
+                       "engine kept up with them.", {},
+                       action="Run the serving probe with --arrival poisson --rate.")
+    if not levels:
+        return finding(
+            "open-loop", "info", "No open-loop level: this run never asked whether the engine "
+            "keeps up.",
+            "Every level here was closed loop, where the generator issues its next request only "
+            "when a previous one completes. Such a harness throttles itself exactly when a real "
+            "arrival stream would not, so it cannot build a queue and its latency percentiles are "
+            "optimistic by construction. That is a property of the measurement, not a fault, but "
+            "no number in this run supports a statement about sustained arrival rate.",
+            {"open_loop_levels": 0, "levels": len(sb.get("levels") or [])},
+            action="Re-run with --arrival poisson --rate to measure sustained rate.")
+
+    not_judged = [lv for lv in levels if lv["grew"] is None]
+    grew = [lv for lv in levels if lv["grew"] is True]
+    capacity = [lv for lv in grew if lv["capacity"] is True]
+    unattributed = [lv for lv in grew if lv["capacity"] is not True]
+    voided_gen = [lv for lv in levels if lv["generator_kept_up"] is False]
+    truncated = [lv for lv in levels if lv["truncated"]]
+    ev = {"open_loop_levels": len(levels),
+          "rates_not_judged": _rates(not_judged),
+          "rates_where_latency_grew": _rates(grew),
+          "rates_with_a_confirmed_engine_queue": _rates(capacity),
+          "rates_where_growth_was_not_attributed": _rates(unattributed),
+          "rates_voided_by_the_generator": _rates(voided_gen),
+          "rates_truncated_by_the_harness": _rates(truncated),
+          "reasons_not_judged": [lv["basis"] for lv in not_judged]}
+
+    if not_judged:
+        return finding(
+            "open-loop", "unknown",
+            "%d of %d open-loop level(s) reached NO verdict." % (len(not_judged), len(levels)),
+            "These levels measured latencies and cannot say whether they were growing. Each one "
+            "names its own reason: the generator missed its own schedule (so the arrivals were a "
+            "catch-up burst and not the process the level names), the harness truncated the level, "
+            "too few requests to test a trend, or too few of the dispatched requests came back to "
+            "support the negative answer. A level in this state is not a level that passed. Its "
+            "latency percentiles describe the requests that returned, which on an overloaded "
+            "engine are the fast ones, so read them as a LOWER bound."
+            + ("" if not capacity else
+               " Separately, %d level(s) DID confirm an engine-side queue: see "
+               "rates_with_a_confirmed_engine_queue." % len(capacity)),
+            ev,
+            action="Raise the client timeout above the tail you expect, or lower the offered rate, "
+                   "and re-run the levels named in rates_not_judged.")
+
+    if capacity:
+        return finding(
+            "open-loop", "warning",
+            "The engine queued work at %s req/s." % ", ".join(str(r) for r in _rates(capacity)),
+            "At these offered rates per-request latency grew across the level AND the engine's own "
+            "waiting count grew with it, which is the pair that makes this a capacity statement "
+            "rather than a latency observation. Rates at or above the lowest of them are not "
+            "sustained rates for this deployment, and any service level quoted from those levels "
+            "describes a queue that was still growing when the level ended.",
+            ev,
+            action="Size for the highest rate whose latency did not grow, and re-measure that rate "
+                   "for longer than one queue's worth of arrivals.",
+            weaker_claim="Say the engine queued at THIS offered rate with THIS workload. It is "
+                         "not established that the engine cannot serve this rate: a different "
+                         "prompt mix, batch configuration or co-tenant load changes the answer.")
+
+    if unattributed:
+        return finding(
+            "open-loop", "warning",
+            "Latency grew at %s req/s, and the cause is not established."
+            % ", ".join(str(r) for r in _rates(unattributed)),
+            "Requests got slower through these levels. What is NOT shown is that the rate offered "
+            "here caused it: either the engine's own running/waiting split was unavailable, or it "
+            "was available and showed no queue. An engine shared between environments produces "
+            "exactly this reading when a co-tenant takes the machine, and so does a thermal or "
+            "power event. Sizing hardware for these rates would be sizing for something that was "
+            "measured but not diagnosed.",
+            ev,
+            action="Re-run with the engine's metrics endpoint reachable, and check what else was "
+                   "resident on the device during the level.",
+            weaker_claim="Say 'latency grew over the level', not 'the engine did not keep up'. The "
+                         "second names a cause the measurement does not identify.")
+
+    return finding(
+        "open-loop", "info",
+        "Latency did not grow at any offered rate (%s req/s)."
+        % ", ".join(str(r) for r in _rates(levels)),
+        "Every open-loop level was judged, and in each one per-request latency was flat across the "
+        "arrival window. A queue that is not growing leaves latency flat however deep the in-flight "
+        "count is, so these rates were absorbed rather than merely survived. Note the stated "
+        "sensitivity limit in the probe's own output: the effect gate sits at half the largest "
+        "value its statistic can take, so a slow ramp can pass it.",
+        ev)
+
+
+def d_open_loop_coverage(res):
+    """How much of the offered load is actually behind the open-loop verdicts.
+
+    The defect this rule exists for: the growth fit ran on requests that SUCCEEDED, so a client
+    timeout removed exactly the requests that prove a queue, and the tighter the timeout the more
+    certainly an overloaded engine was reported as fine. The probe now books errored requests into
+    the fit as censored observations and refuses the negative verdict below a stated completion
+    floor. This rule surfaces the same numbers to a reader, because a level judged on half its
+    requests is not the same evidence as a level judged on all of them.
+    """
+    levels = _open_loop_levels(res)
+    if not levels:
+        return finding("open-loop-coverage", "unknown", "No open-loop level to account for.",
+                       "Completion coverage is a property of an arrival process; a closed-loop "
+                       "level has none.", {"open_loop_levels": 0})
+    have = [lv for lv in levels if lv["fraction"] is not None]
+    leaked = [lv for lv in levels if lv["unaccounted"]]
+    ev = {"open_loop_levels": len(levels),
+          "levels_reporting_completion_fraction": len(have),
+          "rates_with_unaccounted_requests": _rates(leaked),
+          "per_level": [{"rate": lv["rate"], "dispatched": lv["dispatched"], "ok": lv["ok"],
+                         "censored_in_fit": lv["censored"], "completion_fraction": lv["fraction"]}
+                        for lv in levels]}
+    if leaked:
+        return finding(
+            "open-loop-coverage", "blocking",
+            "Requests were dispatched and produced no outcome at all.",
+            "At these rates the level's own accounting does not balance: a dispatched request "
+            "produced neither a result, nor an engine error, nor a harness error. Every rate in "
+            "such a level is understated by an unknown amount and nothing else in the document "
+            "shows it.",
+            ev, action="Fix the accounting before reading any rate from these levels.")
+    if not have:
+        return finding(
+            "open-loop-coverage", "unknown",
+            "The open-loop levels do not report how many of their requests completed.",
+            "Without the completion fraction there is no way to tell a level judged on all its "
+            "requests from one judged on the few that beat a client timeout, and those support "
+            "very different conclusions.",
+            ev, action="Re-run with a probe that records queue_growth.completion_fraction.")
+    thin = [lv for lv in have
+            if lv["floor"] is not None and lv["fraction"] < lv["floor"]]
+    censored = [lv for lv in levels if (lv["censored"] or 0) > 0]
+    if thin:
+        return finding(
+            "open-loop-coverage", "warning",
+            "%d level(s) completed less than %.0f%% of the requests they offered."
+            % (len(thin), 100.0 * max(lv["floor"] for lv in thin)),
+            "The requests that did not come back are the ones that waited longest, so what is left "
+            "is a biased sample of the fast ones. Their durations are booked into the trend as "
+            "censored observations, which are LOWER bounds on the wait, not measurements of it. "
+            "Every latency percentile from these levels is a lower bound, and the probe refuses "
+            "the negative verdict on them for the same reason.",
+            ev,
+            action="Raise the client timeout above the tail you expect, or lower the offered rate, "
+                   "then re-run these levels.",
+            weaker_claim="Say the level did not complete enough requests to judge. Do not say the "
+                         "engine failed: a harness-side ceiling produces the same shortfall.")
+    if censored:
+        return finding(
+            "open-loop-coverage", "info",
+            "Every level cleared the completion floor, with some censored requests in the fit.",
+            "Requests the engine never finished are counted at their harness-timed duration, which "
+            "is a lower bound on the wait, so the trend is if anything understated. The counts are "
+            "in the evidence so a reader can weight the verdicts by how much of the offered load "
+            "each one saw.", ev)
+    return finding(
+        "open-loop-coverage", "info",
+        "Every open-loop request that was dispatched came back.",
+        "No censoring, no unaccounted requests, so each verdict rests on the whole of the load its "
+        "level offered.", ev)
+
+
 RULES = (d_prefix_cache, d_roof_mode, d_power, d_device_parity, d_workload_disclosure,
-         d_reproducibility, d_quality_gate, d_provenance, d_sampling)
+         d_reproducibility, d_quality_gate, d_provenance, d_sampling,
+         d_open_loop_verdict, d_open_loop_coverage)
 
 
 def diagnose(res, attribution=None):

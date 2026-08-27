@@ -5,8 +5,12 @@ Two passes, and the second one is not optional polish.
 CSS has a mechanism for contents page numbers, `target-counter(attr(href), page)`, and the browser
 engine used here does not implement it. Rather than ship a 50-page document whose contents makes a
 reader hunt, the numbers are resolved from the RENDERED document: render once, find the page each
-heading actually landed on, write those numbers into the HTML, render again, and attach a PDF
-outline so the viewer sidebar works too.
+heading actually landed on, write those numbers into a THROWAWAY COPY of the HTML, render that
+again, and attach a PDF outline so the viewer sidebar works too.
+
+The copy is the whole point of the second pass's design. The published HTML has already been
+judged by the claims gate by the time this runs, and an artifact the gate passed may not be edited
+afterwards by anything: the file a reader receives has to be the file that was verified.
 
 The second render is safe because a page number is appended to an existing single-line contents
 entry, so nothing reflows. That is asserted at the end rather than assumed, because "probably still
@@ -30,6 +34,15 @@ FOOTER_TEMPLATE = """
 """
 EMPTY_HEADER = '<div style="display:none"></div>'
 
+# A draft stamp belongs on EVERY page of a PDF, not only on the one carrying the banner: a PDF is
+# read, printed and screenshotted a page at a time, and page 23 on its own must still say what it
+# is. The banner in the HTML covers the first page; this covers the rest.
+DRAFT_FOOTER = '<span style="color:#7f1d1d;font-weight:700">%s</span>&nbsp;&nbsp;&nbsp;'
+
+# The greppable half of the same stamp, in the footer of every page so that extracting the text of
+# any single page finds it. Small and grey because it is addressed to a script, not to a reader.
+DRAFT_MARKER_FOOTER = '&nbsp;&nbsp;<span style="color:#999;font-size:6px">%s</span>'
+
 
 def _require(mod, why):
     """Import an optional dependency, or explain precisely what to install and why.
@@ -49,11 +62,22 @@ def _require(mod, why):
                           "fitz": "pymupdf"}.get(mod, mod)))
 
 
-def render(html_path, out_path=None, footer_left=""):
-    """Render an HTML file to PDF with a page footer. Returns the output path."""
+def render(html_path, out_path=None, footer_left="", draft_note="", draft_marker=""):
+    """Render an HTML file to PDF with a page footer. Returns the output path.
+
+    `draft_note`, when set, is stamped in red at the left of every page footer.
+
+    `draft_marker` is the pipeline-readable half of the same stamp. It goes into the footer as
+    text rather than into the metadata alone, because footer text is on every page and comes back
+    out of any text extraction, which is what a pre-send check actually has to hand. A banner only
+    a person can read is a note, not a control.
+    """
     sync_playwright = _require("playwright.sync_api", "render a PDF").sync_playwright
     src = os.path.abspath(html_path)
     out = os.path.abspath(out_path or (os.path.splitext(src)[0] + ".pdf"))
+    left = (DRAFT_FOOTER % draft_note if draft_note else "") + (footer_left or "")
+    if draft_marker:
+        left += DRAFT_MARKER_FOOTER % draft_marker
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page()
@@ -64,7 +88,7 @@ def render(html_path, out_path=None, footer_left=""):
         page.evaluate("document.querySelectorAll('details').forEach(d => d.open = true)")
         page.wait_for_timeout(400)
         page.pdf(path=out, format="A4", print_background=True, display_header_footer=True,
-                 header_template=EMPTY_HEADER, footer_template=FOOTER_TEMPLATE % footer_left,
+                 header_template=EMPTY_HEADER, footer_template=FOOTER_TEMPLATE % left,
                  margin={"top": "16mm", "bottom": "18mm", "left": "14mm", "right": "14mm"})
         browser.close()
     return out
@@ -109,15 +133,34 @@ def _patch_contents(html, pages):
     return html, n[0]
 
 
-def paginate(html_path, pdf_path, footer_left="", also_write=()):
+def paginate(html_path, pdf_path, footer_left="", also_write=(), draft_note="", draft_marker=""):
     """Add contents page numbers and a PDF outline. Re-renders, then VERIFIES nothing moved.
 
-    `also_write` are extra paths to receive the paginated HTML and PDF, for a versioned edition
-    alongside a working copy. Without it the published edition silently lacks the page numbers,
-    which is a mistake that has been made.
+    THE PAGINATED HTML IS NEVER WRITTEN BACK OVER `html_path`. This function used to read the
+    published HTML, insert the page numbers and the print CSS, and write the file back, after
+    the claims gate had judged it, and after the versioned edition had been copied. The file a
+    reader received was therefore not the file that was verified, and no exit code anywhere said
+    so. Nothing that runs after the gate may edit an artifact the gate passed; a second pass that
+    needs a changed document works on a copy and throws it away. The copy sits beside the original
+    only so that relative links and assets resolve identically, and it is deleted before returning
+    whatever happens.
+
+    `also_write` are extra paths to receive the finished PDF, for a versioned edition alongside a
+    working copy. An .html destination is REFUSED: publishing the working copy is exactly the
+    mutation this function no longer performs.
+
+    `draft_note` and `draft_marker` are passed through to the re-render, so the second pass keeps
+    the stamp the first pass carried. Losing them here would produce an unstamped final PDF from a
+    stamped draft.
     """
     if not os.path.exists(pdf_path):
         raise SystemExit("render the PDF before paginating: %s is missing" % pdf_path)
+    stray = [d for d in also_write if d.endswith(".html")]
+    if stray:
+        raise SystemExit(
+            "paginate() will not write HTML: %s. The paginated document is a working copy that "
+            "the claims gate never saw, so copying it over a published edition would replace a "
+            "verified file with an unverified one." % ", ".join(stray))
     pages = section_pages(pdf_path)
     if not pages:
         raise SystemExit("found no section headings in the PDF; refusing to write a contents page "
@@ -137,9 +180,23 @@ def paginate(html_path, pdf_path, footer_left="", also_write=()):
            "\n  nav.toc li a{display:block}"
            "\n  nav.toc .n{display:inline-block;min-width:2.1em;text-align:left}\n")
     html = html.replace("@media print{", "@media print{" + css, 1)
-    io.open(html_path, "w", encoding="utf-8", newline="\n").write(html)
 
-    render(html_path, pdf_path, footer_left=footer_left)
+    # Beside the original, not in a temp dir: a report references its own directory for anything
+    # it does not inline, and rendering from elsewhere would silently drop it. The leading dot and
+    # the suffix make it unmistakably not a publishable artifact, and the finally clause removes it
+    # even when the render raises.
+    work_path = os.path.join(os.path.dirname(os.path.abspath(html_path)),
+                             ".paginating-" + os.path.basename(html_path))
+    try:
+        io.open(work_path, "w", encoding="utf-8", newline="\n").write(html)
+        render(work_path, pdf_path, footer_left=footer_left, draft_note=draft_note,
+               draft_marker=draft_marker)
+    finally:
+        if os.path.exists(work_path):
+            try:
+                os.unlink(work_path)
+            except OSError:
+                pass
 
     after = section_pages(pdf_path)
     drift = {k: (pages[k], after[k]) for k in pages if k in after and pages[k] != after[k]}
@@ -157,13 +214,22 @@ def paginate(html_path, pdf_path, footer_left="", also_write=()):
                 break
         toc.append([1, title or ("Section " + num), after[num]])
     doc.set_toc(toc)
+    if draft_marker:
+        # Metadata as well as the footer: this is where an Office-aware or PDF-aware tool looks,
+        # and the footer is where a text extraction finds it. Neither alone covers both readers.
+        meta = dict(doc.metadata or {})
+        meta["keywords"] = ("%s %s" % (draft_marker, meta.get("keywords") or "")).strip()
+        meta["subject"] = draft_note or draft_marker
+        doc.set_metadata(meta)
     doc.saveIncr()
     doc.close()
 
     for dst in also_write:
-        src = html_path if dst.endswith(".html") else pdf_path
-        if os.path.exists(src):
-            io.open(dst, "wb").write(io.open(src, "rb").read())
+        if os.path.exists(pdf_path):
+            io.open(dst, "wb").write(io.open(pdf_path, "rb").read())
 
     return {"sections": n, "outline_entries": len(toc), "drift": drift,
-            "verified": not drift}
+            "verified": not drift,
+            # The property the caller has to be able to assert on: pagination touched a working
+            # copy and left the judged document alone.
+            "html_untouched": True, "worked_on": work_path}

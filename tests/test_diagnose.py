@@ -2,7 +2,7 @@
 """Tests for the diagnostics rules. No device, no network.
 
 Each test corresponds to a conclusion a human had to reach by hand at least once. The tests exist so
-the tool keeps reaching it, and -- just as importantly -- so it keeps DECLINING to reach a stronger
+the tool keeps reaching it, and, just as importantly, so it keeps DECLINING to reach a stronger
 conclusion than the evidence supports.
 
 Run:  python -m tests.test_diagnose      (from the repo root)
@@ -302,6 +302,152 @@ class TestSampling(unittest.TestCase):
         This rule did exactly that on its first test run."""
         r = bundle(serve_bench={"levels": [{}, {"concurrency": 4}]})
         self.assertIn(only(r, "sampling")["severity"], D.SEVERITIES)
+
+def open_level(rate, grew=False, capacity=False, ok=30, dispatched=30, censored=0,
+               generator_kept_up=True, truncated=False, unaccounted=0, basis="because",
+               engine_queue_grew=None, floor=0.7):
+    """One open-loop level shaped exactly as the serving probe writes one."""
+    return {
+        "concurrency": None,
+        "requests_ok": ok,
+        "requests_unaccounted": unaccounted,
+        "arrival": {
+            "model": "open_loop_poisson",
+            "target_rate_req_s": rate,
+            "requests_dispatched": dispatched,
+            "generator_kept_up": generator_kept_up,
+            "truncated_by_harness_limit": truncated,
+            "latency_grew_over_the_level": grew,
+            "latency_grew_over_the_level_basis": basis,
+            "engine_did_not_keep_up": capacity,
+            "engine_did_not_keep_up_basis": "because",
+            "fell_behind": grew,
+            "queue_growth": {"n_censored": censored,
+                             "completion_fraction": ok / float(dispatched) if dispatched else None,
+                             "completion_fraction_floor": floor,
+                             "engine_side": {"engine_queue_grew": engine_queue_grew}},
+        },
+    }
+
+
+class TestOpenLoopVerdict(unittest.TestCase):
+    """The open-loop verdict had NO consumer. A source-level count over the report and this module
+    found zero occurrences of fell_behind, arrival, poisson, open_loop, queue_growth or
+    generator_kept_up, so a production open-loop run published a report that could not say whether
+    the engine kept up."""
+
+    def test_a_closed_loop_only_run_says_the_question_was_never_asked(self):
+        r = bundle(serve_bench={"levels": [{"concurrency": 8, "arrival": {"model": "closed_loop"}}]})
+        f = only(r, "open-loop")
+        self.assertEqual(f["severity"], "info")
+        self.assertIn("never asked", f["headline"])
+        self.assertIn("optimistic by construction", f["detail"])
+
+    def test_a_not_judged_level_is_loud_and_is_not_an_all_clear(self):
+        r = bundle(serve_bench={"levels": [
+            open_level(2.0, grew=False),
+            open_level(4.0, grew=None, ok=6, dispatched=90,
+                       basis="not judged: only 6 of 90 dispatched requests completed"),
+        ]})
+        f = only(r, "open-loop")
+        self.assertEqual(f["severity"], "unknown")
+        self.assertIn("NO verdict", f["headline"])
+        self.assertEqual(f["evidence"]["rates_not_judged"], [4.0])
+        self.assertIn("only 6 of 90", f["evidence"]["reasons_not_judged"][0])
+        self.assertIn("LOWER bound", f["detail"])
+
+    def test_a_level_the_generator_voided_is_named_as_such(self):
+        r = bundle(serve_bench={"levels": [open_level(30.0, grew=None, generator_kept_up=False,
+                                                      basis="not judged: the generator missed")]})
+        f = only(r, "open-loop")
+        self.assertEqual(f["severity"], "unknown")
+        self.assertEqual(f["evidence"]["rates_voided_by_the_generator"], [30.0])
+
+    def test_a_truncated_level_is_named_as_such(self):
+        r = bundle(serve_bench={"levels": [open_level(200.0, grew=None, truncated=True,
+                                                      basis="not judged: truncated")]})
+        self.assertEqual(only(r, "open-loop")["evidence"]["rates_truncated_by_the_harness"],
+                         [200.0])
+
+    def test_a_confirmed_engine_queue_is_a_capacity_statement(self):
+        r = bundle(serve_bench={"levels": [open_level(2.0), open_level(6.0, grew=True,
+                                                                      capacity=True,
+                                                                      engine_queue_grew=True)]})
+        f = only(r, "open-loop")
+        self.assertEqual(f["severity"], "warning")
+        self.assertIn("queued work at 6.0 req/s", f["headline"])
+        self.assertIn("do_not_overstate", f)
+        self.assertIn("not established that the engine cannot", f["do_not_overstate"])
+
+    def test_latency_growth_alone_is_never_reported_as_the_engine_failing(self):
+        """The co-tenant case. This box serves prod, qa, dev and live from ONE engine, so a
+        slowdown that queues nothing of ours still drags every latency up."""
+        r = bundle(serve_bench={"levels": [open_level(20.0, grew=True, capacity=False,
+                                                      engine_queue_grew=False)]})
+        f = only(r, "open-loop")
+        self.assertEqual(f["severity"], "warning")
+        self.assertIn("cause is not established", f["headline"])
+        self.assertIn("co-tenant", f["detail"])
+        self.assertIn("not 'the engine did not keep up'", f["do_not_overstate"])
+        text = (f["headline"] + f["detail"]).lower()
+        self.assertNotIn("the engine did not keep up", text)
+
+    def test_a_clean_sweep_states_the_sensitivity_limit_rather_than_claiming_absolute(self):
+        r = bundle(serve_bench={"levels": [open_level(1.0), open_level(2.0)]})
+        f = only(r, "open-loop")
+        self.assertEqual(f["severity"], "info")
+        self.assertIn("did not grow", f["headline"])
+        self.assertIn("sensitivity limit", f["detail"])
+
+    def test_the_deprecated_key_name_is_still_read(self):
+        """A document written before the rename must not be read as having no verdict at all."""
+        lv = open_level(6.0, grew=True, capacity=True, engine_queue_grew=True)
+        del lv["arrival"]["latency_grew_over_the_level"]
+        lv["arrival"]["fell_behind"] = True
+        r = bundle(serve_bench={"levels": [lv]})
+        self.assertEqual(only(r, "open-loop")["evidence"]["rates_where_latency_grew"], [6.0])
+
+
+class TestOpenLoopCoverage(unittest.TestCase):
+    """How much of the offered load is behind each verdict. The growth fit used to run on
+    requests that SUCCEEDED, so a tighter client timeout produced a cleaner bill of health."""
+
+    def test_an_unaccounted_request_is_blocking(self):
+        r = bundle(serve_bench={"levels": [open_level(4.0, unaccounted=2)]})
+        f = only(r, "open-loop-coverage")
+        self.assertEqual(f["severity"], "blocking")
+        self.assertIn("no outcome at all", f["headline"])
+
+    def test_a_level_below_the_completion_floor_warns_that_percentiles_are_lower_bounds(self):
+        r = bundle(serve_bench={"levels": [open_level(6.0, ok=6, dispatched=90, censored=84)]})
+        f = only(r, "open-loop-coverage")
+        self.assertEqual(f["severity"], "warning")
+        self.assertIn("lower bound", f["detail"].lower())
+        self.assertIn("do_not_overstate", f)
+        self.assertEqual(f["evidence"]["per_level"][0]["censored_in_fit"], 84)
+
+    def test_censoring_above_the_floor_is_stated_and_not_alarmed_about(self):
+        r = bundle(serve_bench={"levels": [open_level(4.0, ok=28, dispatched=30, censored=2)]})
+        f = only(r, "open-loop-coverage")
+        self.assertEqual(f["severity"], "info")
+        self.assertIn("censored", f["headline"])
+
+    def test_a_clean_level_says_every_request_came_back(self):
+        f = only(bundle(serve_bench={"levels": [open_level(2.0)]}), "open-loop-coverage")
+        self.assertEqual(f["severity"], "info")
+        self.assertIn("came back", f["headline"])
+
+    def test_a_document_without_the_fraction_cannot_be_judged(self):
+        lv = open_level(2.0)
+        lv["arrival"]["queue_growth"] = {}
+        f = only(bundle(serve_bench={"levels": [lv]}), "open-loop-coverage")
+        self.assertEqual(f["severity"], "unknown")
+        self.assertIn("do not report", f["headline"])
+
+    def test_no_open_loop_level_is_an_unknown_not_a_pass(self):
+        f = only(bundle(serve_bench={"levels": []}), "open-loop-coverage")
+        self.assertEqual(f["severity"], "unknown")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

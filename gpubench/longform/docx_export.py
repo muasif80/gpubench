@@ -27,6 +27,7 @@ INK = RGBColor(0x0B, 0x0B, 0x0B)
 INK2 = RGBColor(0x3A, 0x39, 0x37)
 MUTED = RGBColor(0x6B, 0x69, 0x64)
 ACCENT = RGBColor(0x1F, 0x5F, 0xAD)
+DRAFT_RED = RGBColor(0x7F, 0x1D, 0x1D)   # the draft stamp, matching the HTML banner
 RULE = "D9D8D2"
 SURFACE = "F4F3F0"
 
@@ -287,6 +288,17 @@ def render(doc, node, figdir, pngdir, counter):
             for li in [x for x in c.children if x.tag == "li"]:
                 p = doc.add_paragraph(style=style)
                 add_runs(p, li)
+        elif tag == "div" and "draftbanner" in cls:
+            # The draft stamp. A DOCX is the format that gets mailed and commented on, so a
+            # document the gate did not pass has to say so in Word too, at the top, in red.
+            for sub in find(c, "p"):
+                p = doc.add_paragraph()
+                add_runs(p, sub)
+                for r in p.runs:
+                    r.bold = True
+                    r.font.size = Pt(11)
+                    r.font.color.rgb = DRAFT_RED
+                break
         elif tag == "div" and "stats" in cls:
             # stat tiles become a compact two-column table
             pairs = []

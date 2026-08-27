@@ -298,14 +298,27 @@ def run_nccl(tp, container=None, sizes_kb=None):
 
 
 def run_serving(tp, base_url=None, model=None, concurrency="1,2,4,8,16,32,64", requests=16,
-                input_tokens=512, output_tokens=128, mode="concurrency"):
-    """Serving benchmark: TTFT, inter-token latency, throughput, concurrency curve."""
+                input_tokens=512, output_tokens=128, mode="concurrency",
+                arrival=None, rate=None, arrival_seed=None):
+    """Serving benchmark: TTFT, inter-token latency, throughput, concurrency curve.
+
+    `arrival` selects the load shape and defaults to the probe's own default (closed loop), so an
+    existing caller is unaffected. Pass "poisson" with a `rate` for an open-loop run: requests are
+    then issued on schedule whether or not the service is keeping up, which is the only way to
+    produce the queue build-up that generates a real latency tail.
+    """
     script = probe_path("serving")
     with open(script, "r", encoding="utf-8") as f:
         src = f.read()
     argv = ["python3", "-", "--mode", mode, "--concurrency", concurrency,
             "--requests", str(requests), "--input-tokens", str(input_tokens),
             "--output-tokens", str(output_tokens)]
+    if arrival:
+        argv += ["--arrival", str(arrival)]
+    if rate:
+        argv += ["--rate", str(rate)]
+    if arrival_seed is not None:
+        argv += ["--arrival-seed", str(arrival_seed)]
     if base_url:
         argv += ["--base-url", base_url]
     if model:

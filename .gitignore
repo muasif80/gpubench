@@ -27,3 +27,9 @@ gpubench.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Session handoff: names local checkout paths and a private sibling repo.
+RESUME.md
+
+# Deployment names the publication scanner rejects. The words are the secret.
+tools/denylist.txt
