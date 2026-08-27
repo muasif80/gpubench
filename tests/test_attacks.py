@@ -440,9 +440,25 @@ class ArticleCase(unittest.TestCase):
         os.makedirs(self.out_dir)
         self.builds = 0
         self.write_artefact()
+        self.write_cited_document()
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write_cited_document(self):
+        """The file the "a source can be redeemed" half of the A9 attack cites.
+
+        A9 used to accept a source for the SHAPE of the string, so "docs/engine-config.md" cleared
+        it whether or not any such file had ever existed. It is now RESOLVED against the manifest
+        directory and its parents, so the positive half of that test needs the document to be
+        there: a path that names nothing is the attack, not the control. It lives beside the output
+        directory rather than inside it, so clear_out() still owns everything it publishes.
+        """
+        docs = os.path.join(self.tmp, "docs")
+        os.makedirs(docs, exist_ok=True)
+        with io.open(os.path.join(docs, "engine-config.md"), "w",
+                     encoding="utf-8", newline="\n") as f:
+            f.write("# engine configuration\n\nThe decode step budget was read from here.\n")
 
     # ---- the gate's own evidence ----
 

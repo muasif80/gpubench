@@ -63,6 +63,12 @@ CALL_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "claims-call
 
 GATE_ARTEFACT = "gate-result.json"
 
+# A file build() drops into the output directory that nothing declares. Empty by default; the A11
+# tests set it. This is the whole R21 shape: build(run_dir, out_dir) is HANDED the directory the
+# report publishes from, so a content module can write a document into it and that document ships
+# without any check having read it.
+STRAY = ""
+
 
 def build(run_dir, out_dir=None):
     # A REAL gate artefact, written where the manifest says it is. G3 reads the file rather than
@@ -77,6 +83,11 @@ def build(run_dir, out_dir=None):
                 "method": {"cases_published": [{"id": "c1"}, {"id": "c2"}]},
                 "errors": [],
             }}}, indent=2))
+        if STRAY:
+            with io.open(os.path.join(out_dir, STRAY), "w", encoding="utf-8",
+                         newline="\\n") as f:
+                f.write("<html><body><p>An undeclared page. It reaches 9999.0 tok/s.</p>"
+                        "</body></html>")
     return {}, {"a": 10.0, "b": 20.0}
 
 
@@ -156,13 +167,16 @@ DEMOTED_WITH_CHANGELOG = DEMOTED + '''\
 
 
 def content_module(dirpath, total="30.0", manifest=True, claims_fn=True, extra="",
-                   name="content_mod.py"):
+                   name="content_mod.py", stray=""):
     """Write a content module and return its path.
 
     total="30.0"  -> the derived claim recomputes; the gate passes.
     total="33.0"  -> printed 33 where the formula gives 30. The gate must block.
+    stray="x.html" -> build() also drops that file into out_dir, declared by nothing.
     """
     src = HEAD
+    if stray:
+        src += '\nSTRAY = %r\n' % stray
     if manifest and claims_fn:
         src += MANIFEST_DECL % {"total": total, "extra": extra}
     elif manifest:
@@ -1136,6 +1150,693 @@ class TestDocxCarriesTheMachineReadableMarker(unittest.TestCase):
             with zipfile.ZipFile(path) as z:
                 core = z.read("docProps/core.xml").decode("utf-8")
         self.assertEqual(core.count(longform.DRAFT_MARKER), 1, core)
+
+
+# ======================================================================================
+# THE FORMATS PEOPLE ACTUALLY OPEN
+#
+# The build proved the HTML on disk was the HTML the gate judged and printed matching sha256 to
+# say so. The PDF and the DOCX were exported after that proof and nothing read them at all, so
+# "the document you received was verified" was true only of the format nobody opens. These tests
+# hold the other two to the same standard: what each one PRINTS must be what the judged document
+# printed.
+# ======================================================================================
+
+
+def have(module):
+    try:
+        __import__(module)
+        return True
+    except ImportError:
+        return False
+
+
+HAVE_FITZ = have("fitz")
+HAVE_PYTHON_DOCX = have("docx")
+
+
+def minimal_docx(path, paragraphs):
+    """A real OPC package carrying `paragraphs`, built with nothing but the standard library.
+
+    Deliberately NOT python-docx. The extractor under test reads word/document.xml, and a fixture
+    written by the same library that reads it back would prove only that the two agree with each
+    other. `paragraphs` is a list of run lists, so a test can put a numeral across a run boundary.
+    """
+    import zipfile
+
+    body = "".join(
+        "<w:p>%s</w:p>" % "".join('<w:r><w:t xml:space="preserve">%s</w:t></w:r>' % run
+                                  for run in runs)
+        for runs in paragraphs)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("word/document.xml",
+                    '<?xml version="1.0"?><w:document xmlns:w="urn:w"><w:body>%s</w:body>'
+                    "</w:document>" % body)
+    return path
+
+
+def minimal_pdf(path, pages):
+    """A real PDF, one page per string. Newlines become lines, which is what get_text reads back."""
+    import fitz
+
+    doc = fitz.open()
+    for text in pages:
+        doc.new_page().insert_text((60, 80), text, fontsize=11)
+    doc.save(path)
+    doc.close()
+    return path
+
+
+class TestDocxTextExtraction(unittest.TestCase):
+    """A .docx is a zip. Reading what Word will show is the only way to compare it against the
+    HTML that was judged, because the two formats cannot share a digest."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gpubench-docx-text-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def docx(self, paragraphs):
+        return longform.docx_text(minimal_docx(os.path.join(self.tmp, "d.docx"), paragraphs))
+
+    def test_it_reads_the_text_of_a_paragraph(self):
+        self.assertIn("It reaches 30.0 tok/s", self.docx([["It reaches 30.0 tok/s"]]))
+
+    def test_runs_inside_one_paragraph_are_joined_with_nothing(self):
+        """Word lays them out edge to edge: a bold word mid-sentence is its own run. Inserting a
+        separator here would invent a gap the reader never sees, and split a numeral that a bold
+        span happens to cross."""
+        self.assertIn("It reaches 30.0 tok/s", self.docx([["It reaches ", "30.0", " tok/s"]]))
+
+    def test_two_paragraphs_cannot_be_read_across(self):
+        """Two table cells holding 10 and 20 must not read as the numeral 1020."""
+        self.assertEqual(sorted(longform.visible_numerals(self.docx([["10"], ["20"]]))),
+                         ["10", "20"])
+
+    def test_a_line_break_inside_a_paragraph_separates_too(self):
+        import zipfile
+
+        path = os.path.join(self.tmp, "br.docx")
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("word/document.xml",
+                        '<?xml version="1.0"?><w:document xmlns:w="urn:w"><w:body><w:p>'
+                        "<w:r><w:t>10</w:t></w:r><w:r><w:br/></w:r><w:r><w:t>20</w:t></w:r>"
+                        "</w:p></w:body></w:document>")
+        self.assertEqual(sorted(longform.visible_numerals(longform.docx_text(path))),
+                         ["10", "20"])
+
+    def test_character_references_are_decoded(self):
+        """THE REASON BYTE-IDENTITY OF THE HTML PROVES NOTHING ABOUT THE WORD FILE. The conversion
+        decodes references the gate scanned as raw text, so one source is seven numerals to one
+        reading and one number to the other."""
+        text = self.docx([["&#57;&#44;&#53;&#50;&#54;&#46;&#54; tok/s"]])
+        self.assertEqual(sorted(longform.visible_numerals(text)), ["9526.6"])
+
+    def test_a_file_that_is_not_a_word_document_is_reported(self):
+        import zipfile
+
+        path = os.path.join(self.tmp, "empty.docx")
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("docProps/core.xml", "<x/>")
+        with self.assertRaises(ValueError):
+            longform.docx_text(path)
+
+
+@unittest.skipUnless(HAVE_FITZ, "pymupdf is not installed")
+class TestPdfTextExtraction(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gpubench-pdf-text-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_it_reads_every_page(self):
+        path = minimal_pdf(os.path.join(self.tmp, "a.pdf"), ["one 11 W", "two 22 W"])
+        text, pages, dropped = longform.pdf_text(path)
+        self.assertEqual((pages, dropped), (2, 0))
+        self.assertEqual(sorted(longform.visible_numerals(text)), ["11", "22"])
+
+    def test_pages_cannot_be_read_across(self):
+        path = minimal_pdf(os.path.join(self.tmp, "b.pdf"), ["10", "20"])
+        text, _pages, _dropped = longform.pdf_text(path)
+        self.assertEqual(sorted(longform.visible_numerals(text)), ["10", "20"])
+
+    def test_the_page_footer_numbering_is_set_aside_and_counted(self):
+        """The renderer prints "Page 3 of 54"; the document does not. Removed here and COUNTED, so
+        the allowance is a stated quantity in the build log rather than a silent exemption."""
+        from gpubench.longform import pdf_export
+
+        path = minimal_pdf(os.path.join(self.tmp, "c.pdf"),
+                           ["body 11 W\nPage 1 of 2", "body 22 W\nPage 2 of 2"])
+        text, pages, dropped = longform.pdf_text(path, drop=(pdf_export.FOOTER_NUMBERING,))
+        self.assertEqual((pages, dropped), (2, 2))
+        self.assertEqual(sorted(longform.visible_numerals(text)), ["11", "22"])
+
+
+class TestExportNumeralComparison(unittest.TestCase):
+    """judge_exports on its own: what an export prints, against what the judged HTML printed."""
+
+    HTML = "<main><p>It reaches 30.0 tok/s across 2 devices.</p></main>"
+
+    def test_an_export_printing_only_judged_numerals_is_clean(self):
+        result = longform.judge_exports(self.HTML, [("r.docx", "It reaches 30.0 tok/s")])
+        self.assertEqual(result["unmatched"], 0, result)
+
+    def test_a_numeral_the_judged_html_does_not_print_is_reported(self):
+        """A conversion that adds a number changed what the reader is told, and the HTML digest
+        cannot see it: the two formats do not share bytes."""
+        result = longform.judge_exports(self.HTML, [("r.docx", "It reaches 47.5 tok/s")])
+        self.assertEqual(result["unmatched"], 1, result)
+        self.assertIn("47.5", result["formats"][0]["unmatched"])
+
+    def test_the_finding_carries_the_context_a_reader_can_search_for(self):
+        result = longform.judge_exports(self.HTML, [("r.docx", "It reaches 47.5 tok/s")])
+        self.assertIn("47.5", result["formats"][0]["unmatched"]["47.5"][0])
+
+    def test_an_export_printing_less_is_not_a_finding(self):
+        """A DOCX takes figures as pictures, so their axis labels do not come back out as text.
+        Checking that direction too would report every figure in every Word edition, forever."""
+        result = longform.judge_exports(self.HTML, [("r.docx", "30.0 tok/s")])
+        self.assertEqual(result["unmatched"], 0, result)
+
+    def test_precision_is_part_of_the_numeral(self):
+        """Reprinting 30.0 as 30.04 is a different figure, and rounding is exactly where a
+        conversion quietly changes one."""
+        result = longform.judge_exports(self.HTML, [("r.docx", "It reaches 30.04 tok/s")])
+        self.assertEqual(sorted(result["formats"][0]["unmatched"]), ["30.04"])
+
+    def test_an_accounted_numeral_is_allowed_and_named(self):
+        """The contents page numbers pagination inserts are real numerals the document does not
+        contain. They are allowed BY NAME, from the step that inserted them."""
+        result = longform.judge_exports(
+            self.HTML, [("r.pdf", "It reaches 30.0 tok/s ... 41")],
+            accounted={"contents page numbers inserted by pagination": ["41"]})
+        self.assertEqual(result["unmatched"], 0, result)
+        self.assertEqual(result["accounted"]["contents page numbers inserted by pagination"],
+                         ["41"])
+
+    def test_every_format_is_counted_whether_or_not_it_fires(self):
+        """"0 findings" over a format nobody looked at reads exactly like "0 findings" over one
+        that was checked end to end, so the counts are output, not decoration."""
+        result = longform.judge_exports(
+            self.HTML, [("r.pdf", "30.0 tok/s"), ("r.docx", "30.0 tok/s 2 devices")])
+        self.assertEqual([f["label"] for f in result["formats"]], ["r.pdf", "r.docx"])
+        self.assertEqual(result["judged"]["distinct"], 2)
+        self.assertEqual([f["distinct"] for f in result["formats"]], [1, 2])
+
+    def test_a_non_breaking_space_is_not_a_difference(self):
+        """A PDF renders one and the HTML source carries the other. Neither is a difference in
+        what was printed, and reporting it would train a reader to ignore the check."""
+        result = longform.judge_exports("<p>66&nbsp;tok/s</p>", [("r.pdf", "66\u00a0tok/s")])
+        self.assertEqual(result["unmatched"], 0, result)
+
+
+class TestExportedFormatsAreJudgedByTheBuild(unittest.TestCase):
+    """cli.judge_exported_formats: the step that reads the exports back off disk, hashes them, and
+    refuses to call the build a success when one of them says something the report does not."""
+
+    HTML = "<main><p>It reaches 30.0 tok/s.</p></main>"
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gpubench-exports-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def docx(self, name, text):
+        return minimal_docx(os.path.join(self.tmp, name), [[text]])
+
+    def judge(self, exported, accounted=None):
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(buf):
+            rc, paths = cli.judge_exported_formats(self.HTML, exported, accounted or {})
+        return rc, buf.getvalue(), paths
+
+    def test_a_clean_export_passes_and_its_digest_is_printed(self):
+        rc, out, _paths = self.judge([("docx", [self.docx("r.docx", "It reaches 30.0 tok/s")])])
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"sha256 [0-9a-f]{64}\s+r\.docx")
+
+    def test_the_digest_printed_is_the_digest_of_the_file_on_disk(self):
+        import hashlib
+
+        path = self.docx("r.docx", "It reaches 30.0 tok/s")
+        _rc, out, _paths = self.judge([("docx", [path])])
+        with io.open(path, "rb") as f:
+            self.assertIn(hashlib.sha256(f.read()).hexdigest(), out)
+
+    def test_the_counts_are_printed_for_the_html_and_for_every_format(self):
+        path = self.docx("r.docx", "It reaches 30.0 tok/s")
+        _rc, out, _paths = self.judge([("docx", [path])])
+        self.assertIn("1 additional format(s) judged", out)
+        self.assertIn("distinct numeral(s) printed", out)
+
+    def test_a_fabricated_numeral_in_the_word_file_fails_the_build(self):
+        """THE POINT OF THE WHOLE ITEM. The HTML is verified and byte-identical, and the file that
+        actually gets emailed says something else."""
+        rc, out, _paths = self.judge([("docx", [self.docx("r.docx", "It reaches 47.5 tok/s")])])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("EXPORT VERIFICATION FAILED", out)
+        self.assertIn("47.5", out)
+        self.assertIn("r.docx", out)
+
+    def test_two_files_published_as_one_document_must_be_the_same_bytes(self):
+        """index.docx and the versioned edition are the same document to a reader. Only one of
+        them is read here, so if they differ the other is unjudged whatever this reports."""
+        good = self.docx("r.docx", "It reaches 30.0 tok/s")
+        other = self.docx("index.docx", "It reaches 30.0 tok/s and more")
+        rc, out, _paths = self.judge([("docx", [good, other])])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("EXPORT VERIFICATION FAILED", out)
+        self.assertIn("index.docx", out)
+
+    def test_a_byte_identical_copy_is_reported_as_one(self):
+        good = self.docx("r.docx", "It reaches 30.0 tok/s")
+        copy = os.path.join(self.tmp, "index.docx")
+        with io.open(good, "rb") as src, io.open(copy, "wb") as dst:
+            dst.write(src.read())
+        rc, out, paths = self.judge([("docx", [good, copy])])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("byte-identical copy", out)
+        self.assertEqual(sorted(os.path.basename(p) for p in paths), ["index.docx", "r.docx"])
+
+    def test_every_export_file_has_its_digest_recorded(self):
+        """A copy is covered by the reading of the other one only for as long as it is the same
+        bytes, and the digest is what says it was."""
+        good = self.docx("r.docx", "It reaches 30.0 tok/s")
+        copy = os.path.join(self.tmp, "index.docx")
+        with io.open(good, "rb") as src, io.open(copy, "wb") as dst:
+            dst.write(src.read())
+        _rc, out, _paths = self.judge([("docx", [good, copy])])
+        names = sorted(n for _d, n in re.findall(r"sha256 ([0-9a-f]{64})\s+(\S+)", out))
+        self.assertEqual(names, ["index.docx", "r.docx"], out)
+
+    @unittest.skipUnless(HAVE_FITZ, "pymupdf is not installed")
+    def test_a_pdf_is_judged_the_same_way(self):
+        path = minimal_pdf(os.path.join(self.tmp, "r.pdf"), ["It reaches 47.5 tok/s"])
+        rc, out, _paths = self.judge([("pdf", [path])])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("47.5", out)
+
+    @unittest.skipUnless(HAVE_FITZ, "pymupdf is not installed")
+    def test_the_pdf_page_footer_is_accounted_for_rather_than_reported(self):
+        path = minimal_pdf(os.path.join(self.tmp, "r.pdf"),
+                           ["It reaches 30.0 tok/s\nPage 1 of 1"])
+        rc, out, _paths = self.judge([("pdf", [path])])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("page-footer numbering(s) set aside", out)
+
+    def test_an_export_that_cannot_be_read_back_fails_the_build(self):
+        """An export nothing can read is an export nothing checked, and shipping it on the
+        strength of the HTML's digest is the exact claim this step exists to stop."""
+        path = os.path.join(self.tmp, "broken.docx")
+        with io.open(path, "wb") as f:
+            f.write(b"not a zip at all")
+        rc, out, _paths = self.judge([("docx", [path])])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("could not be read back as text", out)
+
+    @unittest.skipUnless(HAVE_FITZ, "pymupdf is not installed")
+    def test_an_unreadable_pdf_fails_the_build_too(self):
+        path = os.path.join(self.tmp, "broken.pdf")
+        with io.open(path, "wb") as f:
+            f.write(b"%PDF-1.4 and then nothing that parses")
+        rc, out, _paths = self.judge([("pdf", [path])])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("could not be read back as text", out)
+
+    def test_an_accounted_allowance_is_printed_with_the_result(self):
+        """An allowance nobody can see is indistinguishable from a check that does not run."""
+        path = self.docx("r.docx", "It reaches 30.0 tok/s on page 41")
+        rc, out, _paths = self.judge([("docx", [path])],
+                                     {"contents page numbers inserted by pagination": ["41"]})
+        self.assertEqual(rc, 0, out)
+        self.assertIn("accounted: contents page numbers inserted by pagination: 41", out)
+
+
+# ======================================================================================
+# THREE DEFECTS IN THE EXPORTERS THEMSELVES
+#
+# All three were found while building an unrelated document and worked around in that document
+# rather than fixed here, which left them live for every other document these modules convert.
+# ======================================================================================
+
+
+class TestContentsEndIsTheFrontOfTheDocument(unittest.TestCase):
+    """The end of the contents was the LAST page anywhere in the document whose head mentioned the
+    contents heading, so a body page opening with that word swallowed everything before it."""
+
+    def end(self, *heads):
+        from gpubench.longform import pdf_export
+
+        return pdf_export.contents_end(list(heads))
+
+    def test_a_one_page_contents(self):
+        self.assertEqual(self.end("Title page", "Contents 1 Alpha", "1. Alpha"), 1)
+
+    def test_a_contents_that_spills_onto_a_second_page(self):
+        self.assertEqual(self.end("Title", "Contents 1 Alpha", "Contents 9 Omega", "1. Alpha"), 2)
+
+    def test_a_body_page_that_opens_with_the_word_does_not_swallow_the_document(self):
+        """THE DEFECT. A section discussing the document's own structure ended the contents at
+        page forty, and every heading before it was ruled to be inside the contents."""
+        self.assertEqual(
+            self.end("Title", "Contents 1 Alpha", "1. Alpha", "Contents of the sample, 2. Beta"),
+            1)
+
+    def test_no_contents_at_all_skips_the_title_page_and_nothing_else(self):
+        self.assertEqual(self.end("Title", "1. Alpha", "2. Beta"), 0)
+
+    def test_a_document_whose_body_mentions_it_first_is_still_bounded(self):
+        """The run starts at the first mention and stops at the first page that is not adjacent,
+        so at worst one page is skipped rather than forty."""
+        self.assertEqual(self.end("Contents 1 Alpha", "1. Alpha", "Contents again"), 0)
+
+
+@unittest.skipUnless(HAVE_FITZ, "pymupdf is not installed")
+class TestSectionPagesSurvivesABodyPageSayingContents(unittest.TestCase):
+    """The same defect end to end, on a real PDF: with the last-mention rule this document maps no
+    sections at all, and paginate() then refuses to write a contents page."""
+
+    PAGES = ["Title page",
+             "Contents\n1. Alpha\n2. Beta",
+             "1. Alpha\nbody text",
+             "Contents of the sample\n2. Beta\nmore body"]
+
+    def test_every_section_is_still_found(self):
+        from gpubench.longform import pdf_export
+
+        tmp = tempfile.mkdtemp(prefix="gpubench-secpages-")
+        try:
+            path = minimal_pdf(os.path.join(tmp, "r.pdf"), self.PAGES)
+            self.assertEqual(pdf_export.section_pages(path), {"1": 3, "2": 4})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+@unittest.skipUnless(HAVE_PYTHON_DOCX, "python-docx is not installed")
+class TestDefinitionListsReachWord(unittest.TestCase):
+    """docx_export had NO BRANCH for <dl>, so it recursed into <dt> and <dd>, found no branch for
+    those either, and dropped every text child. The block vanished from the Word edition while the
+    HTML kept it. It was found on a title-page control block whose two numbers were the only
+    figures that document computed about itself."""
+
+    HTML = ('<html><head><title>A Control Block</title></head><body><main>'
+            "<h1>A Control Block</h1>"
+            '<dl class="docctl"><dt>Version</dt><dd>8.9</dd>'
+            "<dt>Measurement runs</dt><dd>three artefacts, no hand-edited values</dd></dl>"
+            "<p>Body text.</p></main></body></html>")
+
+    def convert(self, html):
+        from gpubench.longform import docx_export
+
+        self.tmp = tempfile.mkdtemp(prefix="gpubench-dl-")
+        src = os.path.join(self.tmp, "r.html")
+        with io.open(src, "w", encoding="utf-8", newline="\n") as f:
+            f.write(html)
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(buf):
+            docx_export.main([src])
+        return os.path.splitext(src)[0] + ".docx"
+
+    def tearDown(self):
+        shutil.rmtree(getattr(self, "tmp", ""), ignore_errors=True)
+
+    def test_the_terms_and_definitions_are_in_the_word_file(self):
+        text = longform.docx_text(self.convert(self.HTML))
+        for expected in ("Version", "8.9", "Measurement runs", "no hand-edited values"):
+            self.assertIn(expected, text)
+
+    def test_the_numbers_the_block_carries_survive_the_conversion(self):
+        """The two figures the block states about the document are the whole reason it exists."""
+        numerals = longform.visible_numerals(longform.docx_text(self.convert(self.HTML)))
+        self.assertIn("8.9", numerals)
+
+    def test_a_term_and_its_definition_do_not_run_together(self):
+        text = longform.docx_text(self.convert(self.HTML))
+        self.assertNotIn("Version8.9", text)
+
+
+@unittest.skipUnless(HAVE_PYTHON_DOCX, "python-docx is not installed")
+class TestExportedPropertiesDescribeTheDocument(unittest.TestCase):
+    """main() wrote ONE benchmark report's title and subject into the core properties of whatever
+    it was pointed at, so every other document exported through it described itself, in the Word
+    properties pane and in every search index that reads them, as that benchmark report."""
+
+    def convert(self, html, **kwargs):
+        from gpubench.longform import docx_export
+
+        self.tmp = tempfile.mkdtemp(prefix="gpubench-props-")
+        src = os.path.join(self.tmp, "other.html")
+        with io.open(src, "w", encoding="utf-8", newline="\n") as f:
+            f.write(html)
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(buf):
+            docx_export.main([src], **kwargs)
+        import zipfile
+
+        with zipfile.ZipFile(os.path.splitext(src)[0] + ".docx") as zf:
+            return zf.read("docProps/core.xml").decode("utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(getattr(self, "tmp", ""), ignore_errors=True)
+
+    def test_the_title_is_the_documents_own(self):
+        core = self.convert("<html><head><title>Quarterly Storage Review</title></head>"
+                            "<body><main><h1>Quarterly Storage Review</h1></main></body></html>")
+        self.assertIn("<dc:title>Quarterly Storage Review</dc:title>", core)
+
+    def test_it_does_not_claim_to_be_the_benchmark_report(self):
+        core = self.convert("<html><head><title>Quarterly Storage Review</title></head>"
+                            "<body><main><h1>Quarterly Storage Review</h1></main></body></html>")
+        self.assertNotIn("RTX 5090", core)
+        self.assertNotIn("GPU inference benchmark report", core)
+
+    def test_a_document_with_no_title_tag_falls_back_to_its_heading(self):
+        core = self.convert("<html><body><main><h1>Just A Heading</h1></main></body></html>")
+        self.assertIn("<dc:title>Just A Heading</dc:title>", core)
+
+    def test_the_subject_is_empty_rather_than_invented(self):
+        """A converter that cannot read a subject off the page has no business inventing one, and
+        an empty field is the honest answer where a borrowed sentence is a false one."""
+        core = self.convert("<html><head><title>Anything</title></head>"
+                            "<body><main><h1>Anything</h1></main></body></html>")
+        self.assertRegex(core, r"<dc:subject\s*/>|<dc:subject></dc:subject>")
+
+    def test_a_caller_may_still_state_them(self):
+        core = self.convert("<html><head><title>Anything</title></head>"
+                            "<body><main><h1>Anything</h1></main></body></html>",
+                            title="Stated Title", subject="Stated Subject")
+        self.assertIn("<dc:title>Stated Title</dc:title>", core)
+        self.assertIn("<dc:subject>Stated Subject</dc:subject>", core)
+
+
+class TestDocumentTitleExtraction(unittest.TestCase):
+    """The pure function behind it, so the rule is testable without python-docx installed."""
+
+    def title(self, html, fallback=""):
+        from gpubench.longform.docx_export import document_title
+
+        return document_title(html, fallback)
+
+    def test_the_title_tag_wins(self):
+        self.assertEqual(self.title("<title>A</title><h1>B</h1>"), "A")
+
+    def test_the_heading_is_the_fallback(self):
+        self.assertEqual(self.title("<body><h1>B <b>and</b> more</h1>"), "B and more")
+
+    def test_entities_are_decoded(self):
+        self.assertEqual(self.title("<title>A &amp; B</title>"), "A & B")
+
+    def test_an_empty_title_falls_through(self):
+        self.assertEqual(self.title("<title>  </title><h1>B</h1>"), "B")
+
+    def test_a_document_with_neither_uses_the_fallback(self):
+        self.assertEqual(self.title("<p>nothing</p>", fallback="r"), "r")
+
+
+# ======================================================================================
+# R21: A CONTENT MODULE CAN WRITE INTO OUT_DIR BEFORE THE GATE RUNS
+# ======================================================================================
+
+
+class TestOutputDirectoryUnitLevel(unittest.TestCase):
+    """check_output_directory on its own."""
+
+    MANIFEST = {"figures": [{"id": "fig1"}],
+                "runs": {"primary": {"artifact": "gate-result.json"}}}
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gpubench-outdir-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def touch(self, *parts):
+        path = os.path.join(self.tmp, *parts)
+        if not os.path.isdir(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path))
+        with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("x")
+        return path
+
+    def check(self, expected):
+        return longform.check_output_directory(self.tmp, expected, self.MANIFEST)
+
+    def test_a_file_the_engine_writes_is_fine(self):
+        self.assertEqual(self.check([self.touch("report.html")]), [])
+
+    def test_a_figure_the_manifest_declares_is_fine(self):
+        """Read off the declaration rather than from a second list of exceptions: a figure the
+        manifest declares as figures[].id publishes as figures/<id>.svg."""
+        self.touch("figures", "fig1.svg")
+        self.touch("figures", "png", "fig1.png")
+        self.assertEqual(self.check([]), [])
+
+    def test_a_run_artefact_the_manifest_declares_is_fine(self):
+        self.touch("gate-result.json")
+        self.assertEqual(self.check([]), [])
+
+    def test_an_undeclared_file_is_a_finding_that_names_it(self):
+        self.touch("editions.html")
+        out = self.check([])
+        self.assertEqual([f["check"] for f in out], ["A11"])
+        self.assertEqual(out[0]["undeclared"], ["editions.html"])
+        self.assertIn("editions.html", out[0]["message"])
+
+    def test_an_undeclared_figure_is_a_finding_too(self):
+        """A figure that is not in the manifest is exactly the case the declaration rule exists
+        for: it renders into the report and no check knows it is there."""
+        self.touch("figures", "rogue.svg")
+        self.assertEqual(self.check([])[0]["undeclared"], ["figures/rogue.svg"])
+
+    def test_it_is_a_warning_not_an_error(self):
+        """An unaccounted file proves nobody looked at it, not that what it says is wrong. The
+        honest severity is the one --warnings-as-errors turns into a block for a final edition."""
+        self.touch("editions.html")
+        self.assertEqual(self.check([])[0]["severity"], "warn")
+
+    def test_a_missing_directory_is_not_a_finding(self):
+        self.assertEqual(longform.check_output_directory(
+            os.path.join(self.tmp, "nope"), [], self.MANIFEST), [])
+
+
+class TestOutputDirectoryIsEnumerated(GateCase):
+    """END TO END. build(run_dir, out_dir) is handed the output directory, and nothing enumerated
+    it afterwards, so a content module could drop a document beside the report and it shipped with
+    no check having read it."""
+
+    def test_a_clean_build_reports_nothing(self):
+        rc, out = self.article(content_module(self.tmp, total="30.0"))
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("A11", out)
+
+    def test_the_gate_artefact_the_fixture_writes_is_declared_and_not_reported(self):
+        """It is written by build() into out_dir, exactly like the stray file, and the manifest
+        names it as a run's artifact. The rule is declaration, not authorship."""
+        _rc, out = self.article(content_module(self.tmp, total="30.0"))
+        self.assertNotIn("gate-result.json", out)
+
+    def test_a_file_build_dropped_into_out_dir_is_reported(self):
+        rc, out = self.article(content_module(self.tmp, total="30.0", stray="rogue.html"))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("A11", out)
+        self.assertIn("rogue.html", out)
+
+    def test_the_finding_is_in_the_findings_file(self):
+        self.article(content_module(self.tmp, total="30.0", stray="rogue.html"))
+        hits = [f for f in self.findings() if f["check"] == "A11"]
+        self.assertEqual([f["undeclared"] for f in hits], [["rogue.html"]], self.findings())
+
+    def test_warnings_as_errors_blocks_a_build_that_wrote_one(self):
+        """For a final edition an unjudged document in the output directory is a loose end, and
+        the flag that exists for loose ends has to reach this one."""
+        rc, out = self.article(content_module(self.tmp, total="30.0", stray="rogue.html"),
+                               "--warnings-as-errors")
+        self.assertNotEqual(rc, 0, out)
+        self.assertFalse(self.report_exists(), out)
+
+    def test_the_stray_file_is_still_on_disk_to_be_looked_at(self):
+        """The gate does not delete it. It says it is there and unjudged, which is the finding."""
+        self.article(content_module(self.tmp, total="30.0", stray="rogue.html"))
+        self.assertTrue(os.path.exists(os.path.join(self.out_dir, "rogue.html")))
+
+
+# ======================================================================================
+# THE REDACTION GATE'S JURISDICTION
+#
+# It reported "PASS: 0 files scanned" when handed a file rather than a directory, and reported
+# PASS after scanning two of three published artifacts because .pdf is in neither of its
+# extension sets. A gate that scans nothing and reports success is the defect this tool exists to
+# prevent, so the caller states what it published and requires the gate to be able to read it.
+# ======================================================================================
+
+
+class FakeRedact(object):
+    SCAN_EXT = {".html", ".json"}
+    ZIP_EXT = {".docx"}
+
+
+class TestRedactionScope(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="gpubench-redact-scope-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def touch(self, name):
+        path = os.path.join(self.tmp, name)
+        with io.open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("x")
+        return path
+
+    def check(self, published, root=None):
+        buf = io.StringIO()
+        with redirect_stdout(buf), redirect_stderr(buf):
+            rc = cli.check_redaction_scope(FakeRedact(), root or self.tmp, published)
+        return rc, buf.getvalue()
+
+    def test_everything_published_is_readable(self):
+        rc, out = self.check([self.touch("r.html"), self.touch("r.docx")])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("2 published file(s) in scope", out)
+
+    def test_a_format_the_gate_cannot_read_stops_the_build(self):
+        """It would walk past the PDF and report PASS over the two files it can read, which is a
+        pass over an artifact nobody checked."""
+        rc, out = self.check([self.touch("r.html"), self.touch("r.pdf")])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("NO JURISDICTION", out)
+        self.assertIn("r.pdf", out)
+
+    def test_it_names_the_sets_it_read(self):
+        _rc, out = self.check([self.touch("r.pdf")])
+        self.assertIn(".docx", out)
+        self.assertIn(".html", out)
+
+    def test_a_scan_with_nothing_in_it_cannot_pass(self):
+        """"PASS: 0 files scanned" is not a pass. It is a gate that did not run."""
+        rc, out = self.check([])
+        self.assertEqual(rc, 1, out)
+        self.assertIn("did not run", out)
+
+    def test_a_file_where_a_directory_belongs_is_refused(self):
+        path = self.touch("r.html")
+        rc, out = self.check([path], root=path)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("not a directory", out)
+
+    def test_the_extension_sets_are_read_off_the_module(self):
+        """A caller that keeps its own copy of them is a caller that will disagree with the gate
+        after the next change to it."""
+        from gpubench.longform import redact
+
+        found = cli._redaction_extensions(redact)
+        self.assertTrue(found >= set(redact.SCAN_EXT), found)
+        self.assertTrue(found >= set(redact.ZIP_EXT), found)
 
 
 if __name__ == "__main__":

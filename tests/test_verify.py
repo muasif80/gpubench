@@ -485,12 +485,12 @@ class TestA8TheRunMustExist(Case):
 
 class TestA9KindIsNotAFreePass(Case):
 
-    def supplied(self, source):
-        m = base_manifest()
+    def supplied(self, source, manifest_dir=None, **over):
+        m = base_manifest(**over)
         m["claims"]["budget"] = claim(3.0, unit="ms", basis="per_token", kind="supplied",
                                       source=source)
         m["claims"]["budget"].pop("run", None)
-        return self.run_verify(m)
+        return self.run_verify(m, manifest_dir=manifest_dir)
 
     def test_engineering_estimate_is_not_provenance(self):
         """The proven attack: forcing a value while leaving kind derived was correctly blocked, and
@@ -505,12 +505,16 @@ class TestA9KindIsNotAFreePass(Case):
         m["claims"]["budget"] = claim(3.0, kind="published")
         self.assertIn("names no source", self.messages(self.run_verify(m), "A9"))
 
-    def test_a_run_id_a_url_and_a_path_are_all_redeemable(self):
+    def test_a_run_id_a_url_and_a_path_that_exists_are_all_redeemable(self):
+        """All four kinds still clear the check, because one that rejected everything would just
+        be a ban on the kind. The path is now one that NAMES SOMETHING: the file is opened."""
+        self.write("engine-config.md", "the engine settings this claim was read from\n")
         for source in ("primary",
                        "https://www.nvidia.com/en-us/geforce/graphics-cards/50-series/",
                        "gpubench.analysis.prefill_comms_ceiling",
-                       "results/20260825-160142-final/inventory.json"):
-            self.assertEqual(self.found(self.supplied(source), "A9"), [], source)
+                       "engine-config.md"):
+            f = self.supplied(source, self.tmp)
+            self.assertEqual(self.found(f, "A9"), [], "%s: %s" % (source, self.messages(f, "A9")))
 
     def test_a_percentage_that_is_not_derived_is_an_error(self):
         """A ratio is a quotient of two numbers that are somewhere else in the manifest, so a
@@ -1301,6 +1305,296 @@ class TestTheManifestIsNotMutated(Case):
         before = json.dumps(m, sort_keys=True)
         self.run_verify(m)
         self.assertEqual(json.dumps(m, sort_keys=True), before)
+
+
+class TestAttributeQuotingIsNotAHidingPlace(Case):
+    """REPRODUCED HOLE. The attribute scanner matched name="value" and nothing else, so a stale
+    figure in title='peak draw 1240 W' was never scanned while the double-quoted spelling was.
+    Both are ordinary HTML, a browser renders them identically, and no author intends the
+    distinction: a generator whose own string is double-quoted reaches for single quotes by
+    accident, and that is the spelling that escaped the only check with jurisdiction over what
+    shipped.
+    """
+
+    def hidden(self, attribute):
+        doc = self.document('<p %s>See the table.</p><table><tr><td>233</td></tr></table>'
+                            % attribute)
+        return self.run_verify(base_manifest(), doc)
+
+    def test_a_single_quoted_tooltip_is_scanned(self):
+        f = self.hidden("title='peak draw 1240 W'")
+        self.assertIn("1240", self.messages(f, "A5"))
+
+    def test_the_two_quoting_styles_produce_the_same_finding(self):
+        """The control that matters. It is not enough that both are scanned; the gate must not be
+        deciding WHAT IT READS by how the generator happened to quote it."""
+        single = self.messages(self.hidden("title='peak draw 1240 W'"), "A5")
+        double = self.messages(self.hidden('title="peak draw 1240 W"'), "A5")
+        self.assertIn("1240", double)
+        self.assertEqual(single, double)
+
+    def test_an_unquoted_value_is_scanned(self):
+        """HTML's third quoting style. A browser reads it, a screen reader reads it, and it was
+        invisible to the gate."""
+        self.assertIn("1240", self.messages(self.hidden("title=1240W"), "A5"))
+
+    def test_alt_and_aria_label_are_scanned_in_every_style(self):
+        for attribute in ("alt='the 1240 W ceiling'", 'alt="the 1240 W ceiling"',
+                          "aria-label='the 1240 W ceiling'", 'aria-label="the 1240 W ceiling"'):
+            self.assertIn("1240", self.messages(self.hidden(attribute), "A5"), attribute)
+
+    def test_a_closing_angle_bracket_inside_a_value_does_not_lose_the_attribute(self):
+        """The regression this rewrite could have introduced. Tags are matched with their quoted
+        values consumed as units, so a ">" inside one does not end the tag early and take the rest
+        of its attributes out of scope."""
+        f = self.hidden('title="peak draw 1240 W > budget"')
+        self.assertIn("1240", self.messages(f, "A5"))
+
+    def test_an_attribute_name_inside_another_attributes_value_is_not_an_attribute(self):
+        """data-note is not a value a reader sees, so the number inside it is out of scope, and
+        walking the pairs in order is what keeps the name from being read out of the middle of
+        someone else's value."""
+        f = self.hidden('data-note="alt=1240W"')
+        self.assertEqual(self.found(f, "A5"), [], self.messages(f, "A5"))
+
+    def test_prose_that_merely_looks_like_an_attribute_is_counted_once(self):
+        """The false positive an unquoted-attribute rule invites. "Set title=1240W in the config"
+        is a sentence, already visible through the stripper, and counting it a second time as an
+        attribute would inflate the denominator with a number that was never in a tag."""
+        doc = self.document("<p>Set title=1240W in the config.</p>")
+        f = self.run_verify(base_manifest(), doc)
+        flagged = [i for i in self.found(f, "A5", "error") if "numeral" in i]
+        self.assertEqual([i["numeral"] for i in flagged], ["1240"], self.messages(f, "A5"))
+        self.assertEqual(flagged[0]["occurrences"], 1)
+        self.assertEqual(f.coverage["unit_bearing_total"], 1)
+
+
+class TestA9SourceMustNameSomethingThatExists(Case):
+    """REPRODUCED HOLE. source_resolves() checked the SHAPE of the string and never opened
+    anything, so "results/never-existed/nope.json" redeemed a permanent exemption from
+    recomputation: the strongest reason a claim can give for not being recomputed had only to be
+    SPELLED like a path.
+    """
+
+    def supplied(self, source, manifest_dir=None, run_path=None):
+        m = base_manifest()
+        if run_path:
+            m["runs"]["primary"]["path"] = run_path
+        m["claims"]["budget"] = claim(3.0, unit="ms", basis="per_token", kind="supplied",
+                                      source=source)
+        m["claims"]["budget"].pop("run", None)
+        return self.run_verify(m, manifest_dir=manifest_dir)
+
+    def make(self, *parts):
+        os.makedirs(os.path.join(self.tmp, *parts[:-1]), exist_ok=True)
+        return self.write(os.path.join(*parts), "{}\n")
+
+    def test_a_path_that_names_nothing_is_not_a_source(self):
+        f = self.supplied("results/never-existed/nope.json", self.tmp)
+        self.assertTrue(self.found(f, "A9", "error"))
+        self.assertIn("THAT EXISTS", self.messages(f, "A9"))
+        self.assertIn("Looked for", self.messages(f, "A9"))
+
+    def test_a_file_under_the_manifest_directory_resolves(self):
+        self.make("results", "run-1", "inventory.json")
+        f = self.supplied("results/run-1/inventory.json", self.tmp)
+        self.assertEqual(self.found(f, "A9"), [], self.messages(f, "A9"))
+
+    def test_a_digit_led_directory_segment_is_part_of_the_path(self):
+        """A real run directory is named 20260825-160142-final. The token pattern required every
+        segment to start with a letter, which was harmless while nothing opened the result and
+        wrong the moment something did: the path was read as "final/nccl_allreduce.json" and looked
+        for in a place it had never been."""
+        self.make("results", "20260825-160142-final", "nccl_allreduce.json")
+        f = self.supplied("the size axis of the all-reduce sweep, "
+                          "results/20260825-160142-final/nccl_allreduce.json", self.tmp)
+        self.assertEqual(self.found(f, "A9"), [], self.messages(f, "A9"))
+
+    def test_a_file_above_the_manifest_directory_resolves(self):
+        """A manifest is PUBLISHED into an output directory while its sources are written relative
+        to the project it was built in, so the manifest's own directory alone would reject every
+        honest path in a real report."""
+        out = os.path.join(self.tmp, "article", "public")
+        os.makedirs(out)
+        self.make("results", "nccl_allreduce.json")
+        f = self.supplied("the size axis, results/nccl_allreduce.json", out)
+        self.assertEqual(self.found(f, "A9"), [], self.messages(f, "A9"))
+
+    def test_a_parent_reference_is_part_of_the_path(self):
+        """"../gpubench/results/x.json" resolved, if at all, against the wrong directory, because
+        the token pattern started at a letter and dropped the "../" off the front."""
+        sibling = os.path.join(self.tmp, "sibling")
+        os.makedirs(os.path.join(sibling, "results"))
+        with io.open(os.path.join(sibling, "results", "arrivals.json"), "w",
+                     encoding="utf-8", newline="\n") as fh:
+            fh.write("{}\n")
+        out = os.path.join(self.tmp, "project", "out")
+        os.makedirs(out)
+        f = self.supplied("the arrival artefact, ../../sibling/results/arrivals.json", out)
+        self.assertEqual(self.found(f, "A9"), [], self.messages(f, "A9"))
+
+    def test_a_run_directory_the_manifest_declares_is_an_anchor(self):
+        """A manifest that says run "primary" lives at results/final has told the reader where to
+        look, so a claim citing a file inside it names something they can open."""
+        self.make("results", "final", "roofline.json")
+        f = self.supplied("read by the harness and recorded in roofline.json under model",
+                          self.tmp, run_path="results/final")
+        self.assertEqual(self.found(f, "A9"), [], self.messages(f, "A9"))
+
+    def test_a_run_directory_that_does_not_exist_anchors_nothing(self):
+        """The control on the rule above: the anchor is a directory that is THERE, not a string
+        the manifest typed."""
+        f = self.supplied("read by the harness and recorded in roofline.json under model",
+                          self.tmp, run_path="results/final")
+        self.assertTrue(self.found(f, "A9", "error"))
+
+    def test_a_module_path_resolves_without_importing_the_module(self):
+        """Resolution is by LOOKING. importlib.find_spec imports every parent package on the way
+        to the one it is asked about, and a gate that executes code named in the manifest it is
+        judging has opened a hole considerably larger than the one it closed. Both files here
+        raise on import, so an implementation that imported would fail this test loudly."""
+        os.makedirs(os.path.join(self.tmp, "vendorpkg"))
+        self.write(os.path.join("vendorpkg", "__init__.py"),
+                   "raise RuntimeError('the gate imported a module it was only asked to find')\n")
+        self.write(os.path.join("vendorpkg", "spec.py"),
+                   "raise RuntimeError('the gate imported a module it was only asked to find')\n")
+        f = self.supplied("vendorpkg.spec.decode_budget", self.tmp)
+        self.assertEqual(self.found(f, "A9"), [], self.messages(f, "A9"))
+        self.assertNotIn("vendorpkg", sys.modules)
+
+    def test_a_module_path_that_names_no_module_is_not_a_source(self):
+        f = self.supplied("vendorpkg.spec.decode_budget", self.tmp)
+        self.assertTrue(self.found(f, "A9", "error"))
+
+    def test_a_url_is_accepted_and_recorded_as_not_resolved(self):
+        """A gate that runs offline cannot fetch a URL, so accepting one is right. Printing it
+        beside a file that WAS opened, with nothing to tell them apart, is not."""
+        f = self.supplied("NVIDIA product specifications, https://www.nvidia.com/rtx-5090/",
+                          self.tmp)
+        self.assertEqual(self.found(f, "A9"), [], self.messages(f, "A9"))
+        self.assertEqual(len(f.sources), 1)
+        self.assertFalse(f.sources[0]["resolved"])
+        self.assertEqual(f.sources[0]["how"], "url")
+        self.assertEqual(f.sources[0]["named"], "https://www.nvidia.com/rtx-5090/")
+
+    def test_checked_and_merely_well_formed_are_distinguishable_in_the_output(self):
+        self.write("engine-config.md", "the engine settings this claim was read from\n")
+        opened = self.supplied("engine-config.md", self.tmp)
+        cited = self.supplied("https://vendor.example/engine-spec", self.tmp)
+        self.assertTrue(opened.sources[0]["resolved"])
+        self.assertEqual(opened.sources[0]["how"], "file")
+        self.assertFalse(cited.sources[0]["resolved"])
+
+        read = io.StringIO()
+        V.report(opened, read)
+        self.assertIn("1 resolved on disk, 0 accepted unresolved", read.getvalue())
+        self.assertNotIn("did NOT resolve", read.getvalue())
+
+        merely = io.StringIO()
+        V.report(cited, merely)
+        self.assertIn("0 resolved on disk, 1 accepted unresolved", merely.getvalue())
+        self.assertIn("did NOT resolve", merely.getvalue())
+
+    def test_a_rejected_source_is_not_listed_as_an_acceptance(self):
+        """It is already an error with its own line, and printing it again under a heading that
+        says "accepted" would read as the gate waving it through."""
+        f = self.supplied("results/never-existed/nope.json", self.tmp)
+        self.assertEqual(f.sources, [])
+
+
+class TestUnicodeSpaceSeparators(Case):
+    """REPRODUCED HOLE. The thousands-separator fix knew two characters, the ordinary space and
+    U+00A0. Unicode has a column of the things, each of them splits a numeral, and each split made
+    the gate read a different number than the reader does.
+    """
+
+    SEPARATORS = (("ordinary space", " "), ("no-break space", "\u00a0"),
+                  ("thin space", "\u2009"), ("narrow no-break space", "\u202f"),
+                  ("figure space", "\u2007"), ("zero-width space", "\u200b"))
+
+    def printed(self, separator, value):
+        m = base_manifest()
+        m["claims"]["throughput"]["value"] = value
+        return self.run_verify(m, self.document(
+            "<p>The pair sustained 9%s526.6 tok/s.</p>" % separator))
+
+    def test_every_separator_lets_the_gate_read_the_number_the_reader_reads(self):
+        for name, separator in self.SEPARATORS:
+            f = self.printed(separator, 9526.6)
+            self.assertEqual(self.found(f, "A5", "error"), [],
+                             "%s: %s" % (name, self.messages(f, "A5")))
+            self.assertEqual(f.coverage["unit_bearing_covered"], 1, name)
+
+    def test_every_separator_stops_the_split_reading_validating_an_unrelated_claim(self):
+        """The attack each of these carries: a claim of 526.6 exists, the document prints a figure
+        seven thousand larger, and the gate used to call it covered."""
+        for name, separator in self.SEPARATORS:
+            f = self.printed(separator, 526.6)
+            self.assertTrue(self.found(f, "A5", "error"), name)
+            self.assertIn("9,526.6", self.messages(f, "A5"), name)
+
+    def test_every_separator_says_which_reading_it_took(self):
+        for name, separator in self.SEPARATORS:
+            f = self.printed(separator, 9526.6)
+            self.assertTrue(self.found(f, "A5", "warn"), name)
+
+    def test_a_zero_width_split_is_named_as_the_invisible_thing_it_is(self):
+        """A reader is shown no gap at all, so this is not a thousands separator printed wrong; it
+        is a character that should not be inside a number."""
+        f = self.printed("\u200b", 9526.6)
+        self.assertIn("ZERO-WIDTH", self.messages(f, "A5"))
+        self.assertIn("9526.6", self.messages(f, "A5"))
+
+    def test_a_non_three_digit_split_is_a_finding_and_not_a_guess(self):
+        """"9 25.2 GB/s" is 925.2 to a merger and two numbers to a reader. The difference is a
+        factor of thirty-six and there is NO correct guess in either direction, so the gate reports
+        it instead of answering it. Note that the split reading is fully covered here: without this
+        check the build is clean and the reader is looking at an unbacked figure."""
+        m = base_manifest()
+        m["claims"]["bandwidth"] = claim(25.2, unit="GB/s")
+        f = self.run_verify(m, self.document("<p>The link carried 9 25.2 GB/s.</p>"))
+        self.assertTrue(self.found(f, "A5", "error"), self.messages(f, "A5"))
+        message = self.messages(f, "A5")
+        self.assertIn("925.2", message)
+        self.assertIn("9 and 25.2", message)
+
+    def test_the_ambiguous_numeral_is_not_merged_in_either_direction(self):
+        """Merging it would be the gate picking one of the two readings and then checking its own
+        pick, which is this file's own failure mode wearing a fix's clothes."""
+        text, sites = V.merge_space_groups("The link carried 9 25.2 GB/s.")
+        self.assertEqual(text, "The link carried 9 25.2 GB/s.")
+        self.assertEqual([site["kind"] for site in sites], ["ambiguous"])
+
+    def test_a_conventional_split_is_still_merged_and_only_warned_about(self):
+        """The control on the rule above: three-digit groups have exactly one reading, so the gate
+        takes it rather than refusing to read a number it can read."""
+        text, sites = V.merge_space_groups("The pair sustained 9 526.6 tok/s.")
+        self.assertIn("9,526.6", text)
+        self.assertEqual([site["kind"] for site in sites], ["thousands"])
+
+    def test_a_zero_width_split_reads_as_one_number_whatever_the_grouping(self):
+        """A zero-width space is invisible, so nothing about it is ambiguous: the reader sees
+        925.2 and only an unprepared scanner sees two numbers."""
+        m = base_manifest()
+        m["claims"]["bandwidth"] = claim(925.2, unit="GB/s")
+        f = self.run_verify(m, self.document("<p>The link carried 9\u200b25.2 GB/s.</p>"))
+        self.assertEqual(self.found(f, "A5", "error"), [], self.messages(f, "A5"))
+        self.assertIn("ZERO-WIDTH", self.messages(f, "A5"))
+
+    def test_a_list_of_integers_is_not_a_split_numeral(self):
+        """The false positive the wider pattern invites, and the reason the ambiguous rule asks
+        for a unit or a decimal: "levels 1 2 4 8 16" is five figures in a sentence, and reading it
+        as one would be this gate inventing the very thing it exists to catch."""
+        f = self.run_verify(base_manifest(),
+                            self.document("<p>Levels 1 2 4 8 16 were swept in order.</p>"))
+        self.assertEqual(self.found(f, "A5", "error"), [], self.messages(f, "A5"))
+
+    def test_a_digit_glued_to_a_word_is_still_not_a_thousands_group(self):
+        """The guard the wider separator set must not lose: "GPU1 615.2 TFLOPS" is not 1,615.2."""
+        m = base_manifest()
+        m["claims"]["throughput"] = claim(615.2, unit="TFLOPS")
+        f = self.run_verify(m, self.document("<p>GPU1 615.2 TFLOPS on the timed kernel.</p>"))
+        self.assertEqual(self.found(f, "A5"), [], self.messages(f, "A5"))
 
 
 if __name__ == "__main__":

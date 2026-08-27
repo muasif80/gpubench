@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import zipfile
+from html import unescape
 from html.parser import HTMLParser
 
 try:
@@ -288,6 +289,23 @@ def render(doc, node, figdir, pngdir, counter):
             for li in [x for x in c.children if x.tag == "li"]:
                 p = doc.add_paragraph(style=style)
                 add_runs(p, li)
+        elif tag == "dl":
+            # A DEFINITION LIST HAD NO BRANCH AT ALL, so it fell through to the recursion below,
+            # which walks into <dt> and <dd>, finds no branch for those either, walks into their
+            # #text children, and drops every one: the block vanished from the Word edition
+            # entirely while the HTML kept it. It was found on a title-page control block whose
+            # two numbers were the only figures that document computed about itself, and worked
+            # around in that document rather than fixed here, which left it live for every other
+            # document this module converts.
+            for item in c.children:
+                if item.tag == "dt":
+                    p = doc.add_paragraph()
+                    p.paragraph_format.space_after = Pt(2)
+                    add_runs(p, item, bold=True)
+                elif item.tag == "dd":
+                    p = doc.add_paragraph()
+                    p.paragraph_format.left_indent = Inches(0.25)
+                    add_runs(p, item)
         elif tag == "div" and "draftbanner" in cls:
             # The draft stamp. A DOCX is the format that gets mailed and commented on, so a
             # document the gate did not pass has to say so in Word too, at the top, in red.
@@ -358,12 +376,40 @@ def shade_paragraph(p):
     pr.append(el)
 
 
-def main(argv=None):
+TITLE_TAG = re.compile(r"(?is)<title\b[^>]*>(.*?)</title>")
+H1_TAG = re.compile(r"(?is)<h1\b[^>]*>(.*?)</h1>")
+
+
+def document_title(html, fallback=""):
+    """The document's own title, from its <title> or its <h1>. Never this module's opinion of it.
+
+    WHAT WAS WRONG. main() wrote one particular benchmark report's title and subject into the core
+    properties of whatever it was pointed at. Every other document exported through it therefore
+    described itself, in the Word properties pane and in every search index that reads them, as
+    that benchmark report. A converter is a converter: the only thing it knows about the document
+    is what the document says.
+    """
+    for pattern in (TITLE_TAG, H1_TAG):
+        m = pattern.search(html or "")
+        if m:
+            text = re.sub(r"\s+", " ", re.sub(r"(?s)<[^>]+>", "", m.group(1))).strip()
+            text = unescape(text)
+            if text:
+                return text
+    return fallback
+
+
+def main(argv=None, title=None, subject=""):
     """Convert a rendered HTML report to DOCX.
 
     Paths are derived from the SOURCE DOCUMENT, not from this file. That distinction matters now
     that this module lives in the tool rather than beside one report: deriving `here` from
     __file__ would send it hunting for figures inside the tool's own package directory.
+
+    `title` and `subject` go into the Word core properties. The title defaults to the DOCUMENT'S
+    OWN title rather than to a constant, and the subject to nothing at all: a converter that
+    cannot read a subject off the page has no business inventing one, and an empty field is the
+    honest answer where a borrowed sentence is a false one.
     """
     argv = list(sys.argv[1:] if argv is None else argv)
     src = argv[0] if argv else None
@@ -409,8 +455,9 @@ def main(argv=None):
     cp.comments = ""
     cp.category = ""
     cp.keywords = ""
-    cp.title = "Two RTX 5090s, one consumer board, and the link between them"
-    cp.subject = "GPU inference benchmark report"
+    cp.title = title if title is not None else document_title(
+        html, fallback=os.path.splitext(os.path.basename(src))[0])
+    cp.subject = subject or ""
     now = datetime.datetime.now()
     cp.created = now
     cp.modified = now

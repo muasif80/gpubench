@@ -50,6 +50,7 @@ import json
 import os
 import re
 import tempfile
+from html import unescape as _unescape
 
 from .css import PAGE_CSS
 from .doc import assemble, contents, renumber, reorder_sections, resolve_refs, stat
@@ -66,6 +67,9 @@ __all__ = [
     "check_no_baseline_floor", "NO_BASELINE_MIN_UNIT_BEARING_PCT", "scope_to_document",
     "DOC_CHECKS", "stamp_draft", "stamp_docx_marker", "DRAFT_MARKER", "DRAFT_HEADLINE",
     "report_basename", "report_version", "report_stem",
+    "check_output_directory", "declared_outputs", "FIGURE_DIR", "FIGURE_PNG_DIR",
+    "visible_numerals", "html_numerals", "docx_text", "pdf_text", "judge_exports",
+    "NUMERAL_EQUIVALENTS",
 ]
 
 # Gate outcomes. This module reports them; the caller decides what each one costs. In the CLI only
@@ -483,9 +487,253 @@ def scope_to_document(manifest, html):
     return scoped
 
 
+# ---- R21: nothing may appear in the output directory that nobody declared -------------------
+#
+# build(run_dir, out_dir) is handed the output directory, which it needs: a report's figures are
+# written there. Nothing enumerated it afterwards, so a content module could drop ANY file beside
+# the report and it shipped without a check ever reading it. That is the companion-page failure
+# again, one level lower: the gate held jurisdiction over the documents it was handed and none at
+# all over the directory they went into.
+#
+# The engine knows two things a file can legitimately be: something IT writes (the report, the
+# index copy, the companions, the manifest, the findings, the exports), or something the MANIFEST
+# declares. The second is what keeps figures legitimate without a list of exceptions: a figure the
+# manifest declares as `figures[].id` publishes as figures/<id>.svg, which is the same convention
+# docx_export reads them back by, and a run's `artifact` is the evidence file that run points at.
+# Anything else is undeclared, and undeclared is the whole finding.
+FIGURE_DIR = "figures"
+FIGURE_PNG_DIR = os.path.join("figures", "png")
+
+
+def declared_outputs(out_dir, manifest):
+    """Absolute paths in out_dir that the MANIFEST accounts for: figures, and run artefacts."""
+    root = os.path.abspath(out_dir or ".")
+    out = set()
+    for fig in (manifest or {}).get("figures") or []:
+        fid = (fig or {}).get("id") if isinstance(fig, dict) else None
+        if not fid:
+            continue
+        out.add(os.path.join(root, FIGURE_DIR, "%s.svg" % fid))
+        # The PNG the DOCX export renders from that SVG. It is the engine's own file, but it is
+        # named after a declared figure and lives beside it, so it is derived here for the same
+        # reason: one rule, read off the declaration, rather than a second list to keep in step.
+        out.add(os.path.join(root, FIGURE_PNG_DIR, "%s.png" % fid))
+    for run in ((manifest or {}).get("runs") or {}).values():
+        artifact = (run or {}).get("artifact") if isinstance(run, dict) else None
+        if artifact:
+            out.add(os.path.abspath(os.path.join(root, str(artifact))))
+    return out
+
+
+def check_output_directory(out_dir, expected, manifest):
+    """A11: every file in the output directory is one the engine writes or the manifest declares.
+
+    `expected` is the set of paths THIS build intends to write, which the caller knows and the
+    engine does not: which exports were asked for, what the report and its companions are called.
+
+    Returns findings in verify.py's shape. They are warnings, not errors: an unaccounted file is
+    proof that something reached the output directory unjudged, but not proof that what it says is
+    wrong, and the honest severity for "nobody looked at this" is the one --warnings-as-errors
+    turns into a block for a final edition. Every such file is NAMED, because "1 undeclared file"
+    is not actionable and "editions.html" is.
+    """
+    root = os.path.abspath(out_dir or ".")
+    if not os.path.isdir(root):
+        return []
+    allowed = set(os.path.abspath(p) for p in (expected or ()))
+    allowed |= declared_outputs(root, manifest)
+    stray = []
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            path = os.path.abspath(os.path.join(dirpath, name))
+            if path not in allowed:
+                stray.append(os.path.relpath(path, root).replace("\\", "/"))
+    if not stray:
+        return []
+    return [{
+        "severity": "warn", "check": "A11", "undeclared": sorted(stray),
+        "message": "%d file(s) in the output directory are neither written by the engine nor "
+                   "declared by the manifest, so nothing judged them and they publish beside the "
+                   "report anyway: %s%s. build(run_dir, out_dir) is handed this directory, which "
+                   "is how a document can be written past the gate entirely. Declare a page as a "
+                   "COMPANION so it is judged, declare a figure as figures[].id, or write it "
+                   "somewhere that is not published."
+                   % (len(stray), ", ".join(sorted(stray)[:8]),
+                      "..." if len(stray) > 8 else ""),
+    }]
+
+
+# ---- Every published format is a document, and only one of them was ever judged --------------
+#
+# WHAT WAS WRONG. The build proves the HTML on disk is the HTML the gate judged, and prints
+# matching sha256 to say so. The PDF and the DOCX are exported AFTERWARDS and nothing checked them
+# at all. Byte-identity of the HTML does not carry across the conversion either: the DOCX exporter
+# DECODES character references that the gate scanned as raw text, so "&#57;&#44;&#53;" is three
+# numerals to one reading and one number to the other. Those two formats are what people open and
+# email, so "the document you received was verified" was true only of the format nobody opens.
+#
+# WHAT IS CHECKED. Not the bytes, which cannot match across formats, but what each format PRINTS:
+# every numeral visible in an export must be one the judged HTML also printed. That is the same
+# jurisdiction A5 and A6 hold over the HTML, extended to the artifacts that actually get sent. The
+# direction is deliberate. An export legitimately carries LESS (the DOCX takes figures as images,
+# so their axis labels do not come back out as text); an export carrying MORE is a number that
+# entered the document after the last thing that could check it.
+#
+# Numerals only. A full text diff across three renderers reports hyphenation and ligatures forever
+# and would be switched off within a week; a numeral is the thing this tool exists to protect and
+# the thing a conversion bug actually corrupts.
+
+# Two characters that mean the same thing to a reader and different things to a scanner. A PDF
+# renders a non-breaking space and a typographic minus; the HTML source carries a plain space and
+# a hyphen. Neither difference is a difference in what was printed.
+NUMERAL_EQUIVALENTS = {0x00a0: " ", 0x2212: "-"}
+
+
+def visible_numerals(text):
+    """{numeral: [contexts]} for every numeral a reader can see in `text`.
+
+    The normalisation is the one verify.check_coverage applies to the rendered document, so the
+    set an export is compared against is the set the gate scored: thousands separators grouped,
+    currency marks and commas removed from the key, the printed precision kept. "30" and "30.0"
+    are different numerals here on purpose: a conversion that reprints a figure at a different
+    precision has changed what the reader is told.
+    """
+    from .. import verify as verify_mod
+
+    body = text.replace("&nbsp;", " ").translate(NUMERAL_EQUIVALENTS)
+    body, _sites = verify_mod.merge_space_groups(body)
+    out = {}
+    for match in verify_mod.ANY_NUMERAL.finditer(body):
+        token = match.group(1).lstrip(verify_mod.CURRENCY_MARKS).replace(",", "")
+        out.setdefault(token, []).append(
+            verify_mod.context_of(body, match.start(), match.end()))
+    return out
+
+
+def html_numerals(html):
+    """The numerals the judged HTML prints, read the way the gate reads it."""
+    from .. import verify as verify_mod
+
+    return visible_numerals(verify_mod.visible_text(html))
+
+
+_DOCX_PARAGRAPH = re.compile(r"(?s)<w:p(?:\s[^>]*)?>(.*?)</w:p>")
+# A text run, or one of the three empty elements that put a gap between two runs. Without the
+# second half of this alternation a line break between "10" and "20" would concatenate them into
+# one numeral that neither document contains.
+_DOCX_RUN = re.compile(r"(?s)<w:t(?:\s[^>]*)?>(.*?)</w:t>|<w:(?:br|tab|cr)\b[^>]*>")
+
+
+def docx_text(path):
+    """The text Word shows, read out of the OPC package. Pure stdlib: a .docx is a zip.
+
+    Runs inside one paragraph are joined with NOTHING, because that is how Word lays them out: a
+    bold word mid-sentence is its own run and inserting a separator there would invent a gap the
+    reader never sees, and split numerals that a bold span happens to cross. Paragraphs are
+    separated by the same sentinel verify.py uses, which is not whitespace, so no scanner can read
+    across the boundary between a table cell and the next.
+
+    Only word/document.xml is read. The document properties are metadata rather than text, and a
+    DOCX exported by this tool puts nothing in headers or footers.
+    """
+    import zipfile
+
+    from .. import verify as verify_mod
+
+    try:
+        with zipfile.ZipFile(path) as zf:
+            if "word/document.xml" not in zf.namelist():
+                raise ValueError(
+                    "%s has no word/document.xml, so it is not a Word document" % path)
+            xml = zf.read("word/document.xml").decode("utf-8", "replace")
+    except zipfile.BadZipFile as exc:
+        # ValueError, not BadZipFile: the caller's question is "can this export be read back and
+        # checked", and a file that is not a zip at all answers it the same way as one that is a
+        # zip holding no document.
+        raise ValueError("%s is not readable as a Word package: %s" % (path, exc))
+    paragraphs = []
+    for body in _DOCX_PARAGRAPH.findall(xml):
+        parts = [_unescape(m.group(1)) if m.group(1) is not None else " "
+                 for m in _DOCX_RUN.finditer(body)]
+        paragraphs.append("".join(parts))
+    return (" %s " % verify_mod.BLOCK_BOUNDARY).join(paragraphs)
+
+
+def pdf_text(path, drop=()):
+    """The text a reader can extract from a PDF, page by page. Returns (text, pages, dropped).
+
+    `drop` are compiled patterns for text the RENDERER adds rather than the document: the page
+    footer's own numbering. They are removed here, and counted, so that the removal is a stated
+    quantity in the build log rather than a silent exemption, because an allowance nobody sees is
+    indistinguishable from a check that does not run.
+    """
+    fitz = _require_fitz()
+    try:
+        doc = fitz.open(path)
+    except RuntimeError as exc:
+        # Same reasoning as docx_text: "this export cannot be read back" is one answer however the
+        # underlying library spells the failure, and the caller has to treat it as unjudged.
+        raise ValueError("%s is not readable as a PDF: %s" % (path, exc))
+    try:
+        pages = [page.get_text() for page in doc]
+    finally:
+        doc.close()
+    from .. import verify as verify_mod
+
+    text = (" %s " % verify_mod.BLOCK_BOUNDARY).join(pages)
+    dropped = 0
+    for pattern in drop or ():
+        text, count = pattern.subn(" %s " % verify_mod.BLOCK_BOUNDARY, text)
+        dropped += count
+    return text, len(pages), dropped
+
+
+def _require_fitz():
+    from . import pdf_export
+
+    return pdf_export._require("fitz", "read the text back out of an exported PDF")
+
+
+def judge_exports(judged_html, exports, accounted=None):
+    """Judge every OTHER format this build published against the HTML the gate judged.
+
+    `exports` is [(label, text)]: the visible text of each non-HTML artifact. `accounted` is
+    {reason: iterable of numerals} for figures an export legitimately prints that the document
+    does not: the contents page numbers pagination inserts, and the counts inside a draft stamp
+    applied after judging. Each one is NAMED and printed with the result. An allowance that is not
+    stated is the same thing as no check.
+
+    Returns
+        {"judged": {"distinct": n, "printed": n},
+         "formats": [{"label":, "distinct":, "printed":, "unmatched": {numeral: [contexts]}}],
+         "accounted": {reason: [numerals]},
+         "unmatched": total number of numerals no judged document printed}
+    """
+    judged = html_numerals(judged_html)
+    allowed = {}
+    for reason, tokens in sorted((accounted or {}).items()):
+        allowed[reason] = sorted({str(t) for t in tokens})
+    every_allowance = set()
+    for tokens in allowed.values():
+        every_allowance |= set(tokens)
+    formats = []
+    total = 0
+    for label, text in exports:
+        printed = visible_numerals(text)
+        unmatched = dict((token, contexts) for token, contexts in printed.items()
+                         if token not in judged and token not in every_allowance)
+        total += len(unmatched)
+        formats.append({"label": label, "distinct": len(printed),
+                        "printed": sum(len(v) for v in printed.values()),
+                        "unmatched": unmatched})
+    return {"judged": {"distinct": len(judged),
+                       "printed": sum(len(v) for v in judged.values())},
+            "formats": formats, "accounted": allowed, "unmatched": total}
+
+
 def run_claims_gate(content, figures, data, out_dir, rendered_html=None,
                     warnings_as_errors=False, previous=None, manifest=_UNSET,
-                    companions=None):
+                    companions=None, expected_outputs=None):
     """Verify the claims manifest, and own the only copy of it, BEFORE anything is written.
 
     The verifier existed for a while as a command someone could choose to run, which is the same
@@ -521,6 +769,12 @@ def run_claims_gate(content, figures, data, out_dir, rendered_html=None,
     so the same fabricated headline figures that A5 blocked in the report shipped untouched one
     click away. Each companion is judged by the checks whose subject is a document (DOC_CHECKS),
     against a manifest view scoped to the figures and tables that companion actually renders.
+
+    `expected_outputs` are the paths this build intends to write. Supplying them arms A11, which
+    enumerates out_dir and reports every file that is neither one of those nor declared by the
+    manifest: build() is handed the output directory, so a content module can write a document
+    straight past the gate. Omitting it leaves A11 unarmed, which is right for a caller that does
+    not yet know what it will write and wrong for one that does. The CLI passes its list.
 
     Returns a dict with:
         status         GATE_ABSENT | GATE_INCOMPLETE | GATE_PASS | GATE_BLOCKED
@@ -624,6 +878,12 @@ def run_claims_gate(content, figures, data, out_dir, rendered_html=None,
             check_no_baseline_floor(manifest, getattr(findings, "coverage", None)))
     else:
         findings.items.extend(check_declaration_floor(manifest, previous))
+
+    # A11 runs here for the same reason: it needs the output directory as build() left it, and
+    # only the caller knows which files this build set out to write. It is appended before the
+    # findings file, so the file on disk is still the whole verdict.
+    if expected_outputs is not None:
+        findings.items.extend(check_output_directory(out_dir, expected_outputs, manifest))
 
     findings_path = os.path.splitext(manifest_path)[0] + "-findings.json"
     with io.open(findings_path, "w", encoding="utf-8", newline="\n") as f:

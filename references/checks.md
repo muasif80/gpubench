@@ -1594,3 +1594,95 @@ and not a test. Four (C2, D1, D5, F1) fire in neither the demo nor an id-named t
 behaviour in this document was established by reading the code and by the one-off reproductions
 quoted above rather than by a suite. That gap is worth closing; see the note in this file's
 companion `README.md`.
+
+
+---
+
+# What this gate does not defend against
+
+Everything above describes what the gate checks. This section describes what it does not, and it
+exists because a reference that only lists strengths is a sales document.
+
+**The line runs between carelessness and intent.**
+
+A **careless** author is what this gate stops, and it has stopped real ones. In this project's own
+drafts it caught a clock ceiling of 2,895 MHz that appears in no artefact, a peak temperature stated
+as 41 C where the sustained soak recorded 79, a stale headline sitting in a section heading beside a
+table that disagreed with it, five chart axis ticks concatenated into one numeral, and a contents
+entry read as a measurement once inline markup stopped becoming a space. Each of those was found by
+the gate, not by a reader.
+
+A **determined** author cannot be stopped by a check the author configures. The manifest is written
+by the same person as the document, so any exemption the manifest can grant, that person can grant
+themselves. Eight routes below follow from that and are documented rather than closed, because
+closing one moves the exemption somewhere else rather than removing it. Three adversarial passes
+against this gate each ended by finding a new variant of a route the previous one had closed.
+
+**The mitigation that actually applies is not another check.** It is that the manifest diff between
+two editions is small, structured and human-readable, and the declaration floor makes a manifest
+that shrinks fail rather than pass. Read the diff. Every route below is visible in it as a
+deliberate act: an added allowance, a removed formula, a widened tolerance, a new waiver.
+
+## The eight
+
+**R6, an equality group's tolerance is unbounded, and declaring the group also suppresses A7.**
+A group says two claims should agree and states how closely. The author chooses that tolerance and
+nothing bounds it, so a wide enough one makes any two values agree. Worse, declaring the group also
+stops A7 reporting the collision for those keys, so a two-line object disarms the check that exists
+to catch one quantity printed with two values. **Requires:** writing an equality group you know to
+be false. **Visible as:** a new group, or a tolerance that grew.
+
+**R7, F4 checks zero table cells when the manifest accepts the warning that says so.**
+F4 maps declared table cells to rendered ones. Where the mapping cannot be made it warns, and an
+accepted warning silences it, leaving no table-scoped check running. **Requires:** accepting a
+warning whose text says the check did not run. **Visible as:** an `accepted_warnings` entry naming
+F4.
+
+**R10, deleting a formula removes a claim from recomputation.**
+B1 recomputes any claim carrying inputs and a formula. A claim that declares neither is not
+recomputed, so removing the formula while keeping the same evidence rung moves a value out of
+reach by declaring less about it. **Requires:** deleting a formula that was there. **Visible as:**
+a claim that lost its `formula` between editions.
+
+**R12, an allowance can be broad enough to exempt a class.**
+`coverage.allow` patterns are tested against decoy numerals and one matching all of them is
+refused, which stops `.` but not `^\d+$`: that passes the decoys and exempts every plain integer in
+the document. **Requires:** writing a pattern whose breadth you understand. **Visible as:** an
+allowance whose exempted count is large; the gate prints that count per entry, so the evidence is
+in the build log rather than hidden.
+
+**R14, `gate.artifact_waiver` restores a downgrade.**
+G3 reads a quality-gate result back out of the artefact that produced it and errors when the
+manifest disagrees. A waiver turns that error into a warning, so a gate result nobody can check can
+be published behind one line. **Requires:** writing a waiver for an artefact that exists.
+**Visible as:** a waiver in the `gate` object.
+
+**R15, an unknown printed unit drops the unit family.**
+A numeral is matched against claims sharing its unit family. A unit the tool does not know has no
+family, and the numeral is then matched against claim values generally, so a figure printed in an
+invented unit can be covered by an unrelated claim. **Requires:** printing a measurement in a unit
+the tool does not know while a claim happens to carry the same value. **Visible as:** nothing in
+the manifest; this one is visible only in the document.
+
+**R18, `table_view_shared_with` accepts a table from an unrelated figure.**
+A figure may declare that its table view lives with another figure. F3 checks that the named figure
+renders a non-empty table, not that the table holds the sharing figure's values. **Requires:**
+naming a figure you know does not carry your rows. **Visible as:** a `table_view_shared_with` entry.
+
+**R19, CSS generated content is not text.**
+A `content:` declaration in a stylesheet renders on the page and is not in the document text, so no
+numeral check sees it. **Requires:** writing a stylesheet rule that prints a figure. **Visible as:**
+nothing in the manifest; a reviewer would have to read the stylesheet.
+
+## What that adds up to
+
+Two of the eight (R15, R19) are invisible in the manifest and would have to be caught by reading the
+document or its stylesheet. The other six are visible as a specific, deliberate edit. So the honest
+summary is:
+
+> A number that no measurement supports cannot reach a published document by accident. It can be put
+> there on purpose by whoever writes the manifest, and six of the eight ways to do it leave a mark in
+> a diff a reviewer can read.
+
+State it that way rather than "verified", which claims more than any gate its author configures can
+deliver.

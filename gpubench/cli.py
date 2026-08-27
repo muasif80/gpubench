@@ -329,6 +329,162 @@ def _sha256_text(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _numerals_in(text):
+    """The distinct numerals a piece of text prints, in the gate's own normalisation."""
+    from .longform import visible_numerals
+
+    return set(visible_numerals(text))
+
+
+def _export_text(kind, path):
+    """(visible text, note) for one exported artifact. The note says what was set aside and why."""
+    from .longform import docx_text, pdf_export, pdf_text
+
+    if kind == "docx":
+        return docx_text(path), ""
+    text, pages, dropped = pdf_text(path, drop=(pdf_export.FOOTER_NUMBERING,))
+    return text, "%d page(s), %d page-footer numbering(s) set aside" % (pages, dropped)
+
+
+def judge_exported_formats(judged_html, exported, accounted):
+    """Judge the PDF and the DOCX the way the HTML was judged. Returns (exit code, paths seen).
+
+    WHY THIS EXISTS. The build proves the HTML on disk is the HTML the gate judged and prints
+    matching sha256 to say so. The PDF and the DOCX are exported after that proof and nothing
+    read them at all, so "the document you received was verified" was true only of the format
+    nobody opens. Byte-identity does not carry across a conversion either: the DOCX exporter
+    decodes character references the gate scanned as raw text, so the same bytes can say two
+    different things in the two files.
+
+    What is compared is what each format PRINTS. A numeral visible in an export and in no judged
+    document is a number that entered after the last thing that could check it, and it blocks:
+    the file is named, not sent. The reverse is normal and is not a finding: a DOCX takes
+    figures as pictures, so their axis labels do not come back out as text.
+
+    Each format's counts are printed whether or not anything fires, for the reason the coverage
+    line is printed on every build: "0 findings" over a format nobody looked at reads exactly like
+    "0 findings" over one that was checked end to end.
+    """
+    from .longform import judge_exports
+
+    texts, notes, paths = [], [], []
+    for kind, group in exported:
+        try:
+            text, note = _export_text(kind, group[0])
+        except (IOError, OSError, ValueError) as exc:
+            # A format whose text cannot be read is a format nobody judged, and shipping it on the
+            # strength of the HTML's digest is the exact claim this step exists to stop.
+            print("EXPORT VERIFICATION FAILED: %s could not be read back as text: %s\n"
+                  "             An export nothing can read is an export nothing checked."
+                  % (os.path.basename(group[0]), exc))
+            return 1, paths + list(group)
+        texts.append((os.path.basename(group[0]), text))
+        notes.append(note)
+        paths += list(group)
+    result = judge_exports(judged_html, texts, accounted)
+
+    print("exports: %d additional format(s) judged against the HTML the gate judged, which prints "
+          "%d distinct\n         numeral(s) in %d place(s)"
+          % (len(texts), result["judged"]["distinct"], result["judged"]["printed"]))
+    for i, (_kind, group) in enumerate(exported):
+        # By position, not by name: two formats can share a basename and the entry that gets
+        # reported must be the one that was read.
+        entry, note = result["formats"][i], notes[i]
+        primary = group[0]
+        label = entry["label"]
+        digest = _sha256_file(primary)
+        copies = [p for p in group[1:] if os.path.isfile(p)]
+        mismatched = []
+        print("  sha256 %s  %s" % (digest, label))
+        print("         %d distinct numeral(s) printed, %d that the judged HTML does not print%s"
+              % (entry["distinct"], len(entry["unmatched"]), ("; " + note) if note else ""))
+        # EVERY export file gets its digest recorded, not just the one that was read. A copy is
+        # only covered by the reading above for as long as it is the same bytes, so the digest is
+        # what says it was.
+        for copy in copies:
+            copy_digest = _sha256_file(copy)
+            if copy_digest != digest:
+                mismatched.append(copy)
+            print("  sha256 %s  %s  (%s)"
+                  % (copy_digest, os.path.basename(copy),
+                     "byte-identical copy of %s" % label if copy_digest == digest
+                     else "DIFFERS from %s" % label))
+        if mismatched:
+            # Two files a reader would take for the same document, that are not. Only one of them
+            # was read here, so the other one is unjudged whatever this check reports.
+            print("EXPORT VERIFICATION FAILED: %s and %s are published as the same document and "
+                  "are not the\n             same bytes. Only one of them was judged."
+                  % (label, ", ".join(os.path.basename(p) for p in mismatched)))
+            return 1, paths
+    for reason in sorted(result["accounted"]):
+        tokens = result["accounted"][reason]
+        print("         accounted: %s: %s%s"
+              % (reason, ", ".join(tokens[:12]), "..." if len(tokens) > 12 else ""))
+
+    if not result["unmatched"]:
+        return 0, paths
+    print("\nEXPORT VERIFICATION FAILED: %d numeral(s) are printed by an exported format and by no "
+          "judged\n             document. A conversion that adds a number has changed what the "
+          "reader is told, and\n             the HTML digest above cannot see it. These files must "
+          "not be sent." % result["unmatched"])
+    for entry in result["formats"]:
+        for numeral in sorted(entry["unmatched"]):
+            contexts = entry["unmatched"][numeral]
+            print("  %s  prints %s in %d place(s): %s"
+                  % (entry["label"], numeral, len(contexts), " // ".join(contexts[:2])))
+    return 1, paths
+
+
+def _redaction_extensions(redact):
+    """Every file extension the redaction gate declares it can read.
+
+    Read off the module rather than hardcoded, because the sets are its own and a caller that
+    keeps a second copy of them is a caller that will disagree with it after the next change.
+    """
+    out = set()
+    for name in dir(redact):
+        if not name.endswith("_EXT"):
+            continue
+        value = getattr(redact, name)
+        if isinstance(value, (set, frozenset, tuple, list)):
+            out |= {str(v).lower() for v in value if str(v).startswith(".")}
+    return out
+
+
+def check_redaction_scope(redact, out_dir, published):
+    """Refuse a redaction gate that has no jurisdiction over what this build published.
+
+    TWO WAYS IT REPORTED PASS WITHOUT LOOKING. Handed a file rather than a directory it walked
+    nothing and printed "PASS: 0 files scanned"; and it reported PASS over a directory whose
+    published artifacts included a PDF, because .pdf was in neither of its extension sets. A gate
+    that scans nothing and reports success is the defect this tool exists to prevent, so the
+    caller states what it published and requires the gate to be able to read all of it.
+    """
+    if not os.path.isdir(out_dir):
+        print("REDACTION GATE NOT RUN: %s is not a directory. The gate walks a directory of built "
+              "artifacts;\n             handed anything else it scans nothing and reports PASS."
+              % out_dir)
+        return 1
+    known = _redaction_extensions(redact)
+    files = sorted(set(p for p in published if os.path.isfile(p)))
+    if not files:
+        print("REDACTION GATE NOT RUN: this build published no file for it to scan. A scan with an "
+              "empty\n             scope cannot pass; it did not run.")
+        return 1
+    blind = sorted(p for p in files if os.path.splitext(p)[1].lower() not in known)
+    if blind:
+        print("REDACTION GATE HAS NO JURISDICTION over %d published file(s): %s"
+              % (len(blind), ", ".join(os.path.basename(p) for p in blind)))
+        print("             Their extensions are in none of the gate's scan sets (%s), so it would "
+              "walk past\n             them and report PASS over the ones it can read. A published "
+              "format that the\n             redaction gate cannot read is a format nobody checked."
+              % ", ".join(sorted(known)))
+        return 1
+    print("redaction gate: %d published file(s) in scope: %s"
+          % (len(files), ", ".join(sorted(os.path.basename(p) for p in files))))
+    return 0
+
+
 def _print_coverage(label, coverage):
     """Print what the numeral checks held jurisdiction over, on every build, pass or fail.
 
@@ -367,8 +523,8 @@ def cmd_article(args):
     import importlib.util
     from . import verify as verify_mod
     from .longform import (GATE_ABSENT, GATE_BLOCKED, GATE_INCOMPLETE, GATE_PASS,
-                           BLOCKED_GUIDANCE, DRAFT_MARKER, read_manifest, render_report,
-                           run_claims_gate, stamp_docx_marker, stamp_draft)
+                           BLOCKED_GUIDANCE, DRAFT_HEADLINE, DRAFT_MARKER, read_manifest,
+                           render_report, run_claims_gate, stamp_docx_marker, stamp_draft)
 
     content_path = os.path.abspath(args.content)
     if not os.path.exists(content_path):
@@ -435,6 +591,26 @@ def cmd_article(args):
         return "NOT WRITTEN: %s" % ", ".join(
             [os.path.basename(html_path), "index.html"] + sorted(companions))
 
+    # WHAT THIS BUILD SETS OUT TO WRITE, listed before the gate runs so the gate can enumerate the
+    # output directory and report everything else. build(run_dir, out_dir) is handed that
+    # directory (it has to be, a report's figures go there) and nothing looked at it
+    # afterwards, so a content module could write a whole document beside the report and it
+    # published with no check having read it. The engine cannot know this list; the caller does.
+    companion_files = [(os.path.join(out_dir, name), chtml)
+                       for name, chtml in companions.items()]
+    declared_manifest_path = (os.path.join(out_dir, declared_manifest)
+                              if declared_manifest else None)
+    expected_outputs = [html_path, index_path] + [p for p, _ in companion_files]
+    if declared_manifest_path:
+        expected_outputs += [declared_manifest_path,
+                             os.path.splitext(declared_manifest_path)[0] + "-findings.json"]
+    if args.pdf:
+        expected_outputs += [os.path.splitext(index_path)[0] + ".pdf",
+                             os.path.join(out_dir, stem + ".pdf")]
+    if args.docx:
+        expected_outputs += [os.path.splitext(index_path)[0] + ".docx",
+                             os.path.join(out_dir, stem + ".docx")]
+
     # ---- the gate. Nothing above this line has written a report file. ----
     # It runs even under --no-verify: the flag overrides the verdict, not the checking. A log that
     # says only "skipped" does not say WHAT was skipped, and the findings file is the record.
@@ -444,7 +620,7 @@ def cmd_article(args):
     gate = run_claims_gate(content, figs, _data, out_dir, rendered_html=html,
                            warnings_as_errors=args.warnings_as_errors,
                            previous=previous, manifest=rendered.manifest,
-                           companions=companions)
+                           companions=companions, expected_outputs=expected_outputs)
     print(baseline_note)
     for path in (gate["manifest_path"], gate["findings_path"]):
         if path:
@@ -453,6 +629,16 @@ def cmd_article(args):
         _print_coverage(os.path.basename(html_path), gate["coverage"])
         for name in sorted(gate.get("companion_coverage") or {}):
             _print_coverage(name, gate["companion_coverage"][name])
+    # A11 is a warning, and a passing build does not print its warnings: they are counted in the
+    # gate's own line and listed in the findings file. This one is named anyway, because what it
+    # reports is a FILE THAT IS ABOUT TO BE PUBLISHED with nothing having read it, and a reader of
+    # the build log should not have to open a JSON file to learn that.
+    undeclared = sorted({name for item in gate["findings"] if item.get("check") == "A11"
+                         for name in item.get("undeclared") or ()})
+    if undeclared:
+        print("claims gate: A11: %d file(s) in the output directory were written by neither the "
+              "engine nor\n             declared by the manifest, so nothing judged them and they "
+              "publish anyway: %s" % (len(undeclared), ", ".join(undeclared)))
 
     # Set when the document must carry the draft stamp: the gate did not pass, whatever the reason.
     draft_detail = None
@@ -520,8 +706,11 @@ def cmd_article(args):
         print("stamped: DRAFT, NOT FOR PUBLICATION (visible banner plus the HTML comment marker "
               "%r)" % DRAFT_MARKER)
 
-    companion_files = [(os.path.join(out_dir, name), chtml)
-                       for name, chtml in companions.items()]
+    if draft_detail:
+        # The companion HTML was stamped above, so the paths list built before the gate is holding
+        # the unstamped text. Rebuild it from what is actually about to be written.
+        companion_files = [(os.path.join(out_dir, name), chtml)
+                           for name, chtml in companions.items()]
     promised = [(html_path, html), (index_path, html)] + companion_files
     for path, text in promised:
         try:
@@ -556,19 +745,35 @@ def cmd_article(args):
     draft_note = "DRAFT, NOT FOR PUBLICATION" if draft_detail else ""
     draft_marker = DRAFT_MARKER if draft_detail else ""
 
+    # Every other format this build publishes, and the numerals each format is allowed to print
+    # that the judged document does not. Both are collected as the exports are made, because the
+    # step that adds a numeral is the only step in a position to name it.
+    exported = []                                    # (kind, [paths, newest first])
+    accounted = {}                                   # reason -> numerals
+    if draft_detail:
+        # The stamp goes on after judging and its text states counts. It is already named as the
+        # one accounted difference between the judged HTML and the shipped HTML; it is the same
+        # difference again in every format converted from the shipped one.
+        accounted["the draft stamp applied after judging"] = sorted(
+            _numerals_in(draft_detail + " " + DRAFT_HEADLINE))
+
     if args.pdf:
         from .longform import pdf_export
         pdf_export.render(index_path, footer_left=content.TITLE, draft_note=draft_note,
                           draft_marker=draft_marker)
         # also_write takes the PDF only. Handing it the HTML path is what published the paginated
         # working copy over the verified edition, and paginate() now refuses it outright.
+        versioned_pdf = os.path.join(out_dir, stem + ".pdf")
         info = pdf_export.paginate(index_path, os.path.splitext(index_path)[0] + ".pdf",
                                    footer_left=content.TITLE, draft_note=draft_note,
                                    draft_marker=draft_marker,
-                                   also_write=(os.path.join(out_dir, stem + ".pdf"),))
+                                   also_write=(versioned_pdf,))
         print("wrote %s (%d sections numbered, %d outline entries, contents %s)"
-              % (os.path.join(out_dir, stem + ".pdf"), info["sections"], info["outline_entries"],
+              % (versioned_pdf, info["sections"], info["outline_entries"],
                  "verified" if info["verified"] else "DRIFTED: %s" % info["drift"]))
+        if info.get("inserted"):
+            accounted["contents page numbers inserted by pagination"] = info["inserted"]
+        exported.append(("pdf", [versioned_pdf, os.path.splitext(index_path)[0] + ".pdf"]))
 
     if args.docx:
         from .longform import docx_export
@@ -584,9 +789,11 @@ def cmd_article(args):
                       "file at all, so nothing was\n             copied and this build is a "
                       "failure." % src)
                 return 1
-            with open(src, "rb") as f_in, open(os.path.join(out_dir, stem + ".docx"), "wb") as f_out:
+            versioned_docx = os.path.join(out_dir, stem + ".docx")
+            with open(src, "rb") as f_in, open(versioned_docx, "wb") as f_out:
                 f_out.write(f_in.read())
-            print("wrote %s" % os.path.join(out_dir, stem + ".docx"))
+            print("wrote %s" % versioned_docx)
+            exported.append(("docx", [versioned_docx, src]))
 
     # Re-read from disk, after every step that could have touched a published file.
     drifted = sorted(p for p, digest in shipped.items()
@@ -604,8 +811,18 @@ def cmd_article(args):
         print("  the one accounted difference from the judged document is the draft stamp applied "
               "above:\n  the judged HTML was sha256 %s before it was stamped." % judged_html_sha)
 
+    published = [p for p, _ in promised]
+    if exported:
+        rc, paths = judge_exported_formats(html, exported, accounted)
+        published += paths
+        if rc:
+            return rc
+
     if args.check:
         from .longform import redact
+        rc = check_redaction_scope(redact, out_dir, published)
+        if rc:
+            return rc
         rc = redact.main([out_dir]) if hasattr(redact, "main") else 0
         if rc:
             print("REDACTION GATE FAILED -- not fit to publish")

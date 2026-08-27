@@ -88,7 +88,28 @@ BARE_NUMERAL = re.compile(r"(?<![\w.]) -? \d[\d,]* (?: \.\d+ )? (?![\w])", re.X)
 # throws these away, and the attack hid a stale figure in a title= tooltip for exactly that
 # reason, so attributes are in scope. SVG <title> tooltips need no special handling: they are
 # text between tags and survive stripping.
-VISIBLE_ATTRS = re.compile(r'(?is)\b(?:title|alt|aria-label)\s*=\s*"([^"]*)"')
+VISIBLE_ATTR_NAMES = frozenset(("title", "alt", "aria-label"))
+
+# A START TAG, with its attribute region captured, and QUOTED VALUES CONSUMED AS UNITS so a ">"
+# inside one does not end the tag early. Scanning tag by tag is what makes an UNQUOTED attribute
+# value safe to read: `alt=1911` written in a sentence is prose a reader already sees through the
+# stripper, and counting it again as an attribute would inflate the denominator with a number that
+# was never in a tag at all.
+HTML_TAG = re.compile(r"""(?s)<[A-Za-z][^\s/>]*((?:"[^"]*"|'[^']*'|[^>"'])*)>""")
+
+# One name=value pair inside a tag, in each of HTML'S THREE QUOTING STYLES.
+#
+# THIS USED TO MATCH DOUBLE QUOTES AND NOTHING ELSE, and the distinction is one no author intends:
+# title="peak draw 1911 W" was scanned and title='peak draw 1911 W' was invisible, though both are
+# ordinary HTML and a browser renders them identically. A single quote around a tooltip is what a
+# generator emits the moment its own string is double-quoted, so the spelling that escaped the
+# check is the one an author reaches for by accident.
+#
+# The pairs are walked in order rather than searched for by name, so an attribute name appearing
+# INSIDE another attribute's value (data-note="alt=7") is consumed with that value and cannot be
+# read as an attribute of its own.
+VISIBLE_ATTRS = re.compile(
+    r"""(?is)([A-Za-z_:][-\w:.]*)\s*(?:=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?""")
 
 # A printed numeral. The currency symbol, the thousands separators and a leading sign belong to
 # the NUMERAL and not to the unit, so "$0.11" and "+0.78%" are each one number carrying one unit.
@@ -251,12 +272,36 @@ SPELLED_UNIT_SCANNERS = tuple(
     (re.compile("(?i)(?<![\\w.])(" + _NUMERAL + r")(\s*)(" + phrase + r")\b"), canonical)
     for phrase, canonical in SPELLED_UNIT_PHRASES)
 
-# A thousands separator printed as a space or a non-breaking space. "9 526.6 tok/s" reads as
-# 9,526.6 to a human and used to reach the gate as the two numerals 9 and 526.6, so the gate
-# validated 526.6 against a real claim while the reader saw a number seven thousand larger. The
-# leading (?<![A-Za-z\d.,]) is what stops "GPU1 615.2 TFLOPS" being read as 1,615.2: a digit group
-# glued to a word is part of that word.
-SPACE_GROUPED = re.compile(r"(?<![A-Za-z\d.,])(\d{1,3}(?:[ \u00a0]\d{3})+(?:\.\d+)?)(?![\d])")
+# A numeral a SPACE SEPARATOR splits in two. "9 526.6 tok/s" reads as 9,526.6 to a human and used
+# to reach the gate as the two numerals 9 and 526.6, so the gate validated 526.6 against a real
+# claim while the reader saw a number seven thousand larger. The leading (?<![A-Za-z\d.,]) is what
+# stops "GPU1 615.2 TFLOPS" being read as 1,615.2: a digit group glued to a word is part of that
+# word.
+#
+# THE FIRST VERSION OF THIS KNEW TWO CHARACTERS, the ordinary space and U+00A0, and Unicode has a
+# whole column of the things. A thin space, a narrow no-break space and a figure space are what
+# typesetting software actually emits for a thousands separator, and each of them split a numeral
+# so that the gate read a different number than the reader did. A zero-width space is worse, since
+# it splits the numeral while showing the reader no gap at all.
+#
+# THE GROUPING IS ALSO PART OF THE READING. Three-digit groups after the first are the thousands
+# convention and there is only one way to read them. "9 25.2 GB/s" is not that: a merger reads
+# 925.2 and a reader reads two numbers, and NEITHER READING IS THE RIGHT ONE TO GUESS. So the
+# grouping decides which of three things happens, and one of them is a finding rather than an
+# answer. That is why the first group is \d+ here rather than \d{1,3}: a non-conventional split has
+# to be SEEN before it can be reported, and the old pattern could not see one.
+VISIBLE_GROUP_SEPARATORS = " \u00a0\u2009\u202f\u2007"
+INVISIBLE_GROUP_SEPARATORS = "\u200b"
+GROUP_SEPARATORS = VISIBLE_GROUP_SEPARATORS + INVISIBLE_GROUP_SEPARATORS
+SPACE_GROUPED = re.compile(
+    r"(?<![A-Za-z\d.,])(\d+(?:[" + GROUP_SEPARATORS + r"]\d+)+(?:\.\d+)?)(?![\d])")
+
+# What follows an ambiguous split, when the split is a measurement rather than a list of integers.
+# "levels 1 2 4 8 16" is five numbers in a sentence and reading it as 12,481.6 would be the gate
+# inventing a figure; "9 25.2 GB/s" carries a unit and a decimal, which is what one quantity looks
+# like. Both marks are structural, so neither depends on a word list.
+AMBIGUOUS_TRAILING_UNIT = re.compile(
+    r"\s*([A-Za-z\u00b5\u03bc]{1,12}(?:/[A-Za-z]{1,4})?|%)(?![A-Za-z/])")
 
 # Words that carry no identity, dropped before comparing two labels for near-duplication.
 LABEL_STOPWORDS = frozenset(("the", "a", "an", "of", "at", "in", "on", "per", "for", "and",
@@ -294,6 +339,11 @@ class Findings:
         self.items: list[dict] = []
         self.coverage: dict = {"scope": "the numeral checks did not run"}
         self.acceptances: list[dict] = []
+        # One entry per claim whose kind exempts it from recomputation, saying what its source
+        # turned out to name and WHETHER ANYTHING WAS OPENED. A URL cannot be fetched by a gate
+        # that runs offline, so it is accepted unresolved, and a reader who cannot tell that apart
+        # from a file that was read is being shown a check that did not happen.
+        self.sources: list[dict] = []
         # Set when the manifest itself cannot be read as a manifest, which is exit 2 rather than
         # exit 1. It used to be reachable only for unparseable JSON, because every other broken
         # shape raised a traceback out of a check and killed the process before it could say so.
@@ -491,6 +541,30 @@ def strip_to_visible(html: str) -> str:
     return html_unescape(re.sub(r"(?s)<[^>]+>", "", body))
 
 
+def visible_attr_values(body: str) -> list:
+    """Every title=, alt= and aria-label= value in the markup, whatever it is quoted with.
+
+    Walked tag by tag and then pair by pair, which is what makes all three of HTML's quoting
+    styles readable without inventing attributes out of prose. The old scanner read the whole
+    document for one spelling, `name="value"`, so a number in title='peak draw 1911 W' was never
+    scanned while the double-quoted spelling was: a distinction no author intends, between two
+    forms a browser renders identically.
+    """
+    out = []
+    for tag in HTML_TAG.finditer(body):
+        region = tag.group(1)
+        if not region or "=" not in region:
+            continue
+        for attr in VISIBLE_ATTRS.finditer(region):
+            if attr.group(1).lower() not in VISIBLE_ATTR_NAMES:
+                continue
+            for value in (attr.group(2), attr.group(3), attr.group(4)):
+                if value is not None:
+                    out.append(html_unescape(value))
+                    break
+    return out
+
+
 def visible_text(html: str) -> str:
     """The text a reader can see, plus the attribute values they can see.
 
@@ -499,8 +573,7 @@ def visible_text(html: str) -> str:
     invisible to a tag-stripper, and the omission attack put one there.
     """
     body = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", html)
-    attrs = (" %s " % BLOCK_BOUNDARY).join(
-        html_unescape(v) for v in VISIBLE_ATTRS.findall(body))
+    attrs = (" %s " % BLOCK_BOUNDARY).join(visible_attr_values(body))
     return strip_to_visible(html) + " %s " % BLOCK_BOUNDARY + attrs
 
 
@@ -611,8 +684,36 @@ def unit_bearing_numerals(text: str, attached_exceptions=()) -> list[tuple]:
     return out
 
 
+def split_numeral_reading(printed: str) -> tuple[str, str]:
+    """(kind, the reading) for a numeral a space separator splits.
+
+    Three kinds, and the third one is the point.
+
+      thousands   every group after the first is three digits and the first is one to three, which
+                  is the only convention there is. One reading, so the gate takes it and says so.
+      invisible   every separator is zero-width, so the reader is shown no gap at all and the
+                  digits are simply one number. Also one reading, and not the same one: a
+                  zero-width space between 9 and 25.2 is 925.2 and nothing else.
+      ambiguous   a VISIBLE gap with a grouping the thousands convention does not explain.
+                  "9 25.2 GB/s" is 925.2 to a merger and two numbers to a reader, and the gate has
+                  no way to know which. There is no correct guess here, in either direction, so
+                  this one is reported and never answered.
+
+    The reading is returned with commas where the separators were, which is the same length as
+    what it replaces so that every offset the scanners report stays valid, and which the value
+    parser strips: for the invisible case comma-removal IS the concatenation a reader performs.
+    """
+    merged = re.sub("[" + GROUP_SEPARATORS + "]", ",", printed)
+    if not any(ch in VISIBLE_GROUP_SEPARATORS for ch in printed):
+        return "invisible", merged
+    groups = merged.split(".", 1)[0].split(",")
+    if len(groups[0]) <= 3 and all(len(g) == 3 for g in groups[1:]):
+        return "thousands", merged
+    return "ambiguous", merged
+
+
 def merge_space_groups(text: str) -> tuple[str, list]:
-    """The text with space thousands separators read as separators, and the sites where that
+    """The text with split numerals read the one way each can be read, and the sites where that
     happened.
 
     "9 526.6 tok/s" reads to a human as one number and reached the gate as two, so the gate
@@ -621,15 +722,32 @@ def merge_space_groups(text: str) -> tuple[str, list]:
     scanners report stays valid against the returned text, so a context window still lands where
     the reader would look. Each site is also reported, because a space is not an unambiguous
     thousands separator and the reader deserves to be told which reading the gate took.
+
+    AN AMBIGUOUS SPLIT IS NOT MERGED. Merging it would be the gate choosing one of two readings
+    and then checking the one it chose, which is the failure this whole file exists to prevent
+    wearing a fix's clothes. The site is returned carrying its kind so the caller reports it, and
+    the text is left exactly as the reader meets it.
+
+    An ambiguous run with no unit after it and no decimal in it is left alone entirely: "levels
+    1 2 4 8 16" is five figures in a sentence, and reading it as one is the same invention in the
+    other direction.
     """
     sites = []
     out = list(text)
     for m in SPACE_GROUPED.finditer(text):
         printed = m.group(1)
-        merged = re.sub(r"[  ]", ",", printed)
+        kind, merged = split_numeral_reading(printed)
+        if kind == "ambiguous":
+            trailing = AMBIGUOUS_TRAILING_UNIT.match(text, m.end(1))
+            unit = trailing.group(1) if trailing and unit_of(trailing.group(1)) else None
+            if unit is None and "." not in printed:
+                continue
+            sites.append({"start": m.start(1), "printed": printed, "merged": merged,
+                          "kind": kind})
+            continue
         for i, ch in enumerate(merged):
             out[m.start(1) + i] = ch
-        sites.append((m.start(1), printed, merged))
+        sites.append({"start": m.start(1), "printed": printed, "merged": merged, "kind": kind})
     return "".join(out), sites
 
 
@@ -703,7 +821,7 @@ def label_tokens(label: str) -> frozenset:
 # checks
 
 
-def check_manifest_shape(m: dict, f: Findings) -> None:
+def check_manifest_shape(m: dict, f: Findings, manifest_dir: Path | None = None) -> None:
     """Shape, plus A8 (the named run exists) and A9 (a kind is not a free pass)."""
     if not isinstance(m, dict):
         f.fatal = True
@@ -718,6 +836,7 @@ def check_manifest_shape(m: dict, f: Findings) -> None:
                             % type(m.get("claims")).__name__)
         return
     runs = m.get("runs") if isinstance(m.get("runs"), dict) else {}
+    anchors = source_anchors(manifest_dir, runs)
     for claim_id, c in claims_of(m).items():
         if not isinstance(c, dict):
             f.error("manifest", f"claim {claim_id} is not an object, so nothing about it can be "
@@ -732,7 +851,7 @@ def check_manifest_shape(m: dict, f: Findings) -> None:
             f.error("C1", f"claim {claim_id} has unknown basis {basis!r}", claim=claim_id)
         if c.get("kind") == "measured":
             check_measured_run(claim_id, c, runs, f)
-        check_kind_is_earned(claim_id, c, runs, f)
+        check_kind_is_earned(claim_id, c, runs, f, anchors)
 
 
 def check_measured_run(claim_id: str, c: dict, runs: dict, f: Findings) -> None:
@@ -778,13 +897,16 @@ def check_measured_run(claim_id: str, c: dict, runs: dict, f: Findings) -> None:
         )
 
 
-def check_kind_is_earned(claim_id: str, c: dict, runs: dict, f: Findings) -> None:
+def check_kind_is_earned(claim_id: str, c: dict, runs: dict, f: Findings, anchors=()) -> None:
     """A9: `kind` is a free choice of the generator, so it cannot be the thing that grants trust.
 
-    Two holes closed here, both proven. B1 recomputes only claims whose kind is "derived", so
+    Three holes closed here, all proven. B1 recomputes only claims whose kind is "derived", so
     changing nothing but the kind to "supplied" shipped a claim printed as 3.0 whose own arithmetic
-    gives 10.73. And a percentage is by construction a quotient of two other numbers, so a
-    percentage that is not derived is an arithmetic result nobody checked.
+    gives 10.73. A percentage is by construction a quotient of two other numbers, so a percentage
+    that is not derived is an arithmetic result nobody checked. And the source that redeems the
+    exemption USED TO BE CHECKED FOR ITS SHAPE ALONE: "results/never-existed/nope.json" is a
+    perfectly well-formed path naming no file on this planet, and it bought a permanent exemption
+    from recomputation. A source that names nothing is not a source, so the file gets opened.
     """
     kind, unit, basis = c.get("kind"), c.get("unit"), c.get("basis")
     if (unit == "%" or basis == "ratio") and kind != "derived":
@@ -809,12 +931,19 @@ def check_kind_is_earned(claim_id: str, c: dict, runs: dict, f: Findings) -> Non
                 "the number and an invention.",
                 claim=claim_id,
             )
-        elif not source_resolves(source, runs):
+            return
+        found = resolve_source(source, runs, anchors)
+        if found["accepted"]:
+            # Only what the check LET THROUGH goes on this record. A rejected source is already an
+            # error with its own line; listing it here as well would read as an acceptance.
+            f.sources.append(dict(found, claim=claim_id, kind=kind, source=source))
+        else:
             f.error(
                 "A9",
                 f"claim {claim_id} is {kind!r} with the source {source!r}, which names nothing a "
                 "reader can go and look at. An exemption from recomputation has to be redeemable: "
-                "name a run id from the run table, a URL, or a file or module path.",
+                "name a run id from the run table, a URL, or a file or module path THAT EXISTS. "
+                + found["detail"],
                 claim=claim_id,
             )
 
@@ -823,18 +952,187 @@ def check_kind_is_earned(claim_id: str, c: dict, runs: dict, f: Findings) -> Non
 # like provenance and is not, and any keyword list that admitted "specification" would admit
 # whatever an author typed next. A run id, a URL and a path are the three things this file can
 # actually resolve, so they are the three things it accepts.
-SOURCE_URL = re.compile(r"(?i)\b(?:https?|ftp|file)://\S|\bwww\.\S")
-SOURCE_PATH = re.compile(r"[A-Za-z_][\w-]*(?:[./\\][A-Za-z_][\w-]*)+")
+# \S+ rather than \S, because the URL is now PRINTED as well as counted: a record saying a claim
+# rests on "https://w" tells a reader nothing they can go and open.
+SOURCE_URL = re.compile(r"(?i)\b(?:https?|ftp|file)://\S+|\bwww\.\S+")
+# A path as an author writes one INSIDE A SENTENCE, so a leading "./" or "../" and a drive letter
+# are part of the token and trailing sentence punctuation is not.
+#
+# THE OLD PATTERN REQUIRED EVERY SEGMENT TO START WITH A LETTER, which was fine while nothing ever
+# opened the result and wrong the moment something did: a real run directory is named
+# "20260825-160142-final", so "results/20260825-160142-final/nccl_allreduce.json" was read as the
+# token "final/nccl_allreduce.json" and looked for in the wrong place. It also started at a letter,
+# which quietly dropped the "../" off a path and resolved it against the wrong directory.
+SOURCE_PATH = re.compile(
+    r"(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])*[A-Za-z0-9_][\w.\\/-]*\w")
+SOURCE_PATH_PREFIX = re.compile(r"^(?:[A-Za-z]:[\\/])?(?:\.{1,2}[\\/])*")
 
 
-def source_resolves(source: str, runs: dict) -> bool:
+def path_candidate(token: str) -> bool:
+    """Whether a token is shaped like a path or a module path rather than a word or a number.
+
+    A separator is what makes it one. A token whose only separator is a dot must also start with a
+    letter, or "25.2" in "9 25.2 GB/s" would be a filename this gate went looking for.
+    """
+    body = SOURCE_PATH_PREFIX.sub("", token)
+    if not body:
+        return False
+    if "/" in token or "\\" in token:
+        return True
+    return "." in body and (body[0].isalpha() or body[0] == "_")
+
+# How far above the manifest a relative source is looked for. A manifest is PUBLISHED into an
+# output directory ("article/public") while its sources are written relative to the project it was
+# built in, so the manifest's own directory alone would reject every honest path in a real report.
+# It is bounded rather than open so a search cannot wander up to the filesystem root.
+MAX_SOURCE_ANCESTORS = 4
+
+
+def source_anchors(manifest_dir: Path | None, runs: dict) -> list:
+    """The directories a relative source path is resolved against, most specific first.
+
+    The manifest's own directory, a bounded walk up from it, and the directory of every run path
+    the manifest ITSELF declares. That last group is not a guess: a manifest that says run
+    "harness" lives at results/20260825-160142-final has told the reader where to look, so a claim
+    citing a file inside it names something the reader can open.
+    """
+    roots: list = []
+
+    def add(path):
+        try:
+            resolved = Path(path).resolve()
+        except (OSError, ValueError):
+            return
+        if resolved not in roots:
+            roots.append(resolved)
+
+    add(manifest_dir if manifest_dir is not None else Path.cwd())
+    base = roots[0] if roots else None
+    for _ in range(MAX_SOURCE_ANCESTORS):
+        if base is None or base.parent == base:
+            break
+        base = base.parent
+        add(base)
+    declared = list(roots)
+    for run in (runs or {}).values():
+        if not isinstance(run, dict):
+            continue
+        for field in ("path", "artifact"):
+            value = run.get(field)
+            if not (isinstance(value, str) and value.strip()):
+                continue
+            for root in declared:
+                candidate = Path(value)
+                candidate = candidate if candidate.is_absolute() else root / value
+                try:
+                    if candidate.is_dir():
+                        add(candidate)
+                        break
+                    if candidate.is_file():
+                        add(candidate.parent)
+                        break
+                except OSError:
+                    continue
+    return roots
+
+
+def path_exists(token: str, anchors) -> bool:
+    """Whether this path token names something on disk, under any anchor."""
+    try:
+        candidate = Path(token)
+    except (OSError, ValueError):
+        return False
+    try:
+        if candidate.is_absolute():
+            return candidate.exists()
+    except OSError:
+        return False
+    for root in anchors:
+        try:
+            if (root / token).exists():
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def module_exists(token: str, anchors) -> bool:
+    """Whether this dotted token names a module file, on the import path or under an anchor.
+
+    Resolved BY LOOKING, never by importing. importlib.find_spec imports every parent package on
+    the way to the one it is asked about, and a gate that executes code named in the manifest it is
+    judging has opened a hole considerably larger than the one it closed. Prefixes are walked from
+    the longest down, because "gpubench.analysis.prefill_comms_ceiling" names a function inside a
+    module and the module is the thing that exists.
+    """
+    parts = token.split(".")
+    if len(parts) < 2 or not all(part.isidentifier() for part in parts):
+        return False
+    roots = [Path(entry) for entry in sys.path if entry] + list(anchors)
+    while len(parts) >= 2:
+        relative = Path(*parts)
+        for root in roots:
+            try:
+                if (root / (str(relative) + ".py")).exists():
+                    return True
+                if (root / relative / "__init__.py").exists():
+                    return True
+            except (OSError, ValueError):
+                continue
+        parts.pop()
+    return False
+
+
+def resolve_source(source: str, runs: dict, anchors=()) -> dict:
+    """What a source string actually names, and whether anything was opened to find out.
+
+    THE CHECK THIS REPLACES NEVER OPENED ANYTHING. It tested the SHAPE of the string, so
+    "results/never-existed/nope.json" redeemed a permanent exemption from recomputation: the
+    strongest reason a claim can give for not being recomputed was a path that had only to be
+    spelled like a path. A source that names nothing is not a source.
+
+    A URL is the one case that cannot be settled here, because this gate runs offline and fetching
+    it would make the build depend on a web server. It is ACCEPTED, and the fact that nothing was
+    opened is RECORDED rather than left to look identical to a file that was: "checked" and "merely
+    well-formed" are different verdicts and a reader is entitled to know which one a claim got.
+    """
     if source in runs:
-        return True
-    if any(token.strip(",.;:()[]") in runs for token in source.split()):
-        return True
-    if SOURCE_URL.search(source):
-        return True
-    return bool(SOURCE_PATH.search(source))
+        return {"accepted": True, "resolved": True, "how": "run",
+                "named": source, "detail": "resolved to run %r." % source}
+    for token in source.split():
+        stripped = token.strip(",.;:()[]")
+        if stripped in runs:
+            return {"accepted": True, "resolved": True, "how": "run",
+                    "named": stripped, "detail": "resolved to run %r." % stripped}
+    tried = []
+    for match in SOURCE_PATH.finditer(source):
+        token = match.group(0)
+        if not path_candidate(token):
+            continue
+        tried.append(token)
+        if path_exists(token, anchors):
+            return {"accepted": True, "resolved": True, "how": "file", "named": token,
+                    "detail": "resolved to the file %r." % token}
+        if module_exists(token, anchors):
+            return {"accepted": True, "resolved": True, "how": "module", "named": token,
+                    "detail": "resolved to the module %r." % token}
+    url = SOURCE_URL.search(source)
+    if url:
+        named = url.group(0).rstrip(",.;:)]")
+        return {
+            "accepted": True, "resolved": False, "how": "url", "named": named,
+            "detail": "names the URL %s, which this gate accepts and did NOT resolve: it runs "
+                      "offline." % named,
+        }
+    if tried:
+        return {
+            "accepted": False, "resolved": False, "how": None, "named": None,
+            "detail": "Looked for %s under %s and found none of them."
+                      % (", ".join(repr(t) for t in tried[:4]),
+                         ", ".join(str(a) for a in list(anchors)[:3]) or "the current directory"),
+        }
+    return {"accepted": False, "resolved": False, "how": None, "named": None,
+            "detail": "Nothing in it is shaped like a run id, a URL or a path."}
 
 
 def check_derivations(m: dict, f: Findings) -> None:
@@ -2011,6 +2309,55 @@ def compile_allowances(coverage: dict, f: Findings, key: str = "allow") -> list:
     return out
 
 
+def report_split_numerals(text: str, sites: list, f: Findings) -> None:
+    """Say which reading the gate took of every numeral a space separator split, or that it took
+    none.
+
+    The two readable kinds are WARNINGS: the gate read the number the reader reads, and the only
+    thing wrong is the spelling. The ambiguous kind is an ERROR, because there the gate did not
+    read the number at all. It cannot: "9 25.2 GB/s" is one figure to a merger and two to a reader,
+    the difference is a factor of thirty-six, and a check that picked one of them and then verified
+    its own pick would be doing the thing this file exists to stop. An unreadable numeral is not a
+    numeral that passed.
+    """
+    seen: dict = {}
+    for site in sites:
+        key = (site["kind"], site["printed"], site["merged"])
+        seen.setdefault(key, []).append(site["start"])
+    for (kind, printed, merged), starts in sorted(seen.items()):
+        where = " // ".join(context_of(text, start, start + len(printed))
+                            for start in starts[:2])
+        if kind == "thousands":
+            f.warn(
+                "A5",
+                "the document prints %r with a space where a thousands separator belongs. This "
+                "gate reads it as %s; a reader may read it as two numbers, and until one of them "
+                "is chosen the gate and the reader are checking different figures. Print the "
+                "comma." % (printed, merged),
+                numeral=merged,
+            )
+        elif kind == "invisible":
+            f.warn(
+                "A5",
+                "the document splits a numeral with a ZERO-WIDTH space: %r. A reader is shown no "
+                "gap at all and reads %s, while an unprepared scanner reads two numbers. This "
+                "gate reads what the reader reads; delete the character."
+                % (printed, merged.replace(",", "")),
+                numeral=merged,
+            )
+        else:
+            f.error(
+                "A5",
+                "the document prints %r, where a space splits a numeral into groups the thousands "
+                "convention does not explain. A merger reads %s and a reader reads %s, and NEITHER "
+                "IS SAFE TO GUESS, so this gate checked no number here at all. Print the figure "
+                "the sentence means, with a comma if it is one number. Context: %s"
+                % (printed, merged.replace(",", ""),
+                   " and ".join(re.split("[" + GROUP_SEPARATORS + "]", printed)), where),
+                numeral=printed,
+            )
+
+
 def check_coverage(m: dict, rendered: Path | None, f: Findings) -> None:
     """A5 and A6: every measurement the DOCUMENT prints traces to a claim.
 
@@ -2049,15 +2396,7 @@ def check_coverage(m: dict, rendered: Path | None, f: Findings) -> None:
     claims = numeric_claims(m)
     f.coverage["scope"] = "%d visible characters of the rendered document" % len(text)
 
-    for printed, merged in sorted({(site[1], site[2]) for site in grouped}):
-        f.warn(
-            "A5",
-            "the document prints %r with a space where a thousands separator belongs. This gate "
-            "reads it as %s; a reader may read it as two numbers, and until one of them is "
-            "chosen the gate and the reader are checking different figures. Print the comma."
-            % (printed, merged),
-            numeral=merged,
-        )
+    report_split_numerals(text, grouped, f)
 
     def allowed(token, numeral, start, end):
         window = text[max(0, start - 60):end + 60]
@@ -2336,7 +2675,7 @@ def apply_accepted_warnings(m: dict, f: Findings) -> None:
 def verify(manifest: dict, previous: dict | None = None, rendered: Path | None = None,
            manifest_dir: Path | None = None) -> Findings:
     f = Findings()
-    check_manifest_shape(manifest, f)
+    check_manifest_shape(manifest, f, manifest_dir)
     if f.fatal:
         return f
     check_derivations(manifest, f)
@@ -2408,6 +2747,21 @@ def report(f: Findings, stream=sys.stdout) -> None:
         for a in taken:
             print("  [ok   ] accepted_warnings[%d] (%s) accepted %d finding(s), cap %d"
                   % (a["index"], a["check"], a["accepted"], a["cap"]), file=stream)
+    # WHICH SOURCES WERE OPENED, AND WHICH WERE ONLY WELL-FORMED. A claim whose kind exempts it
+    # from recomputation rests entirely on its source, so "the file was read" and "the string was
+    # shaped like a URL" are two different verdicts, and printing neither made them look the same.
+    sources = getattr(f, "sources", None) or []
+    unresolved = [s for s in sources if not s.get("resolved")]
+    if sources:
+        print(file=stream)
+        print("  Sources behind the %d claim(s) exempt from recomputation: %d resolved on disk, "
+              "%d accepted unresolved" % (len(sources), len(sources) - len(unresolved),
+                                          len(unresolved)), file=stream)
+        for item in unresolved[:MAX_PER_CHECK]:
+            print("  [ok   ] %s: %s" % (item.get("claim"), item.get("detail", "")), file=stream)
+        if len(unresolved) > MAX_PER_CHECK:
+            print("  [ok   ] ... and %d more accepted unresolved"
+                  % (len(unresolved) - MAX_PER_CHECK), file=stream)
     allowances = (f.coverage or {}).get("allowances") or []
     if allowances:
         print(file=stream)
