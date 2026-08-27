@@ -197,9 +197,40 @@ def main(argv=None):
     if not argv:
         raise SystemExit("usage: redact <directory-of-built-artifacts>")
     root = os.path.abspath(argv[0])
+    # Two ways this gate can pass while checking nothing, and both have now fooled someone.
+    #
+    # ZERO FILES. Handed a file rather than a directory, the walk matches nothing and the old code
+    # printed "PASS: 0 files scanned", which reads exactly like a clean result.
+    #
+    # ZERO LITERALS. The site-specific terms are read from a denylist beside the ARTIFACTS, so
+    # copying artifacts to a scratch directory without it leaves the literal list empty. That is
+    # what happened here: an edition carrying the organisation name in plain text was scanned and
+    # passed, because the one thing that would have matched it was never loaded. The structural
+    # patterns (addresses, keys, home paths) still ran, so it was not a silent no-op, but the half
+    # that catches a NAME was absent and nothing said so.
+    #
+    # A gate that reports success without having looked is the exact defect this tool exists to
+    # prevent, so neither case may print PASS.
+    if not os.path.isdir(root):
+        raise SystemExit(
+            "REFUSING: %s is not a directory. This scans a directory of built artifacts; handed a "
+            "single file it would match nothing and report success." % root)
+    literals = site_literals(root)
     hits, scanned = scan(root)
+    if not scanned:
+        raise SystemExit(
+            "REFUSING: 0 files scanned under %s. Nothing was read, so nothing can be attested."
+            % root)
+    if not literals:
+        raise SystemExit(
+            "REFUSING: no site-specific terms were loaded, so the name half of this gate did not "
+            "run. %d file(s) under %s were checked against the structural patterns only.\n"
+            "Put a denylist.txt beside the artifacts (one term per line), or set "
+            "GPUBENCH_DENY_LITERALS. Passing without it would attest to a check that did not "
+            "happen." % (scanned, root))
     if not hits:
-        print("PASS: %d files scanned under %s, nothing identifying found." % (scanned, root))
+        print("PASS: %d files scanned under %s against %d site term(s) and the structural "
+              "patterns, nothing identifying found." % (scanned, root, len(literals)))
         return 0
     print("FAIL: %d finding(s) across %d files scanned." % (len(hits), scanned))
     for path, lineno, kind, tok, ctx in hits:

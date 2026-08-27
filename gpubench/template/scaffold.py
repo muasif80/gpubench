@@ -427,7 +427,18 @@ def claims(figures, data):
             claim["run"] = data["run_id"]
         else:
             claim["kind"] = "supplied"
-            claim["source"] = data["run_file"]
+            # The COPY beside the manifest, not the bare filename of the original.
+            #
+            # A source exempts a claim from recomputation, so the check that grants the exemption
+            # now opens the file rather than inspecting the shape of the string. A basename resolves
+            # against nothing: the run lives in the scaffold's run/ directory and the manifest is
+            # written to out_dir, so "sample-run.json" names a file that is not there. The scaffold
+            # then failed its own gate, which is worse than no scaffold because it teaches a
+            # first-time user that the gate is noise.
+            #
+            # build() already copies the artefact to out_dir under this name for the quality gate to
+            # read, and the run table already points at it. Same file, same directory, one form.
+            claim["source"] = ARTIFACT_COPY
         table[row["id"]] = claim
     for total_id, meta in TOTALS.items():
         parts = [row["id"] for row in EXTRACT if row.get("sum_into") == total_id]
