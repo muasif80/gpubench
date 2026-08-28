@@ -687,7 +687,18 @@ class TestGeneratorFidelity(unittest.TestCase):
         late = arr["dispatch_lateness_ms"]
         self.assertEqual(late["count_late"], 25)
         self.assertGreater(late["max"], 11.0)
-        self.assertLess(late["max"], 25.0)
+        # The upper bound separates the DEFECT from scheduler noise, and those are orders of
+        # magnitude apart. The defect measured slack before the sleep, so lateness accumulated
+        # across the level and its maximum would land near 25 x 12 ms, about 300 ms. The operating
+        # system adds tens of milliseconds of its own on a machine doing anything else, which is
+        # not a defect and is not controllable from here.
+        #
+        # This was 25.0 and failed one full verification run at 33.7 ms while passing in isolation
+        # three times over. A wall-clock bound tight enough to be flaky is a bound that gets
+        # widened in a hurry the next time it fires, by someone who will not check first whether
+        # the number moved for a real reason. 150 ms is still less than half the defect's
+        # signature and comfortably above anything the scheduler has produced here.
+        self.assertLess(late["max"], 150.0)
         # 12 ms against a 200 ms mean gap is 6%, inside the budget, so this level is still usable.
         self.assertTrue(arr["generator_kept_up"])
         self.assertAlmostEqual(arr["generator_fidelity"]["mean_inter_arrival_ms"], 200.0, places=6)
