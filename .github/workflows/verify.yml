@@ -1,4 +1,4 @@
-# Every push runs the eleven test suites and the claims verifier.
+# Every push runs the twelve test suites and the claims verifier.
 #
 # NO GPU IS INVOLVED ANYWHERE IN THIS FILE, and that is a property of the code rather than a
 # compromise made for CI. The orchestrator never touches CUDA: it ships probes to a target and
@@ -54,7 +54,8 @@ defaults:
     shell: bash
 
 jobs:
-  # The ten fast suites. One job each, so a failure names the suite without anyone reading a log.
+  # The eleven fast suites. One job each, so a failure names the suite without anyone
+  # reading a log.
   #
   # docx_header_repeat skips itself when python-docx is absent, which is the normal state of a
   # clean runner. That is deliberate: it asserts against the bytes of a produced .docx, so there is
@@ -67,7 +68,8 @@ jobs:
       fail-fast: false
       matrix:
         suite: [analysis, diagnose, gate, verify, attacks, template,
-                redact_control, docx_header_repeat, verify_claims, svg_table_id]
+                redact_control, docx_header_repeat, verify_claims, svg_table_id,
+                shipped_files]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

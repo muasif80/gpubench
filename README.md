@@ -709,7 +709,7 @@ provenance* against the artifact block.
 
 ## Testing
 
-Ten suites ship, and every one runs without a device, a network or a third-party package, from a
+Eleven suites ship, and every one runs without a device, a network or a third-party package, from a
 clean extraction of the release archive.
 
 ```bash
@@ -723,6 +723,7 @@ python -m tests.test_redact_control            # proof the redaction gate can fa
 python -m tests.test_docx_header_repeat        # reads the produced .docx, not the code
 python -m tests.test_verify_claims             # the grounder, including its negative controls
 python -m tests.test_svg_table_id              # a declared table is findable in the output
+python -m tests.test_shipped_files             # the repo contains what the docs promise
 python -m gpubench.template.tests.test_lint    # the report linter
 ```
 
