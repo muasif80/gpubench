@@ -10,9 +10,10 @@ The document is not optional in spirit. A manifest is written by the same genera
 writes the prose, so a check that only reads the manifest cannot see a number the
 generator never declared, and an audit proved that exactly: five fabricated headline
 figures went into a report's abstract and the manifest did not change by one byte. A5
-and A6 hold jurisdiction over what shipped, F3 and F4 over whether a figure's values
-reached the page, and G3 over whether the quality gate's result can be read back out of
-the artefact it names. The rest read the manifest, and say so.
+and A6 hold jurisdiction over what shipped, A12 over the VERDICTS it shipped rather than
+its digits, F3 and F4 over whether a figure's values reached the page, and G3 over whether
+the quality gate's result can be read back out of the artefact it names. The rest read the
+manifest, and say so.
 
     python verify_report.py claims.json
     python verify_report.py claims.json --previous claims-prev.json
@@ -2556,6 +2557,396 @@ DEFAULT_BARE_MIN_SAMPLE = 40
 # means the value is common, not that the sentences are about that claim.
 COINCIDENCE_DISTINCT_NUMERALS = 8
 
+
+# --------------------------------------------------------------------------------------
+# A12: the VERDICTS a document carries (RENDERED DOCUMENT)
+#
+# WHY THIS EXISTS, and it is the hole every check above this line is blind to. The manifest
+# guarantees NUMERIC consistency and nothing else. Three cells of one report asserted that there
+# was no accuracy gate ("Accuracy: Absent, the real hole", "Accuracy gate: None", and a section
+# saying the gap was at the top of the roadmap) while another section reported that same gate
+# running and passing. The contradiction survived THREE EDITIONS, and every number in the document
+# reconciled perfectly the whole time, because a gate that checks digits and ignores verdicts
+# polices the easy half. Nothing above could see it: A5 asks whether a printed number traces to a
+# claim and has no opinion about the word beside it, A2 and A3 read prose the generator listed,
+# and a stale verdict cell is grammatical, unnumbered and internally consistent.
+#
+# So a verdict becomes a declaration like any other, and it is checked against the RENDERED
+# DOCUMENT rather than against the manifest that declares it, for the same reason A5 is: a
+# declaration checked against another declaration is unfalsifiable.
+
+# A heading and its id, in each of HTML's three quoting styles. The backreference closes the tag
+# on the same rank it opened, so an h3 inside an h2's section cannot end that section early.
+HEADING_BLOCK = re.compile(r"(?is)<h([1-6])\b([^>]*)>(.*?)</h\1\s*>")
+ID_ATTR = re.compile(r"""(?is)\bid\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))""")
+
+# A leading section number on a heading's own text: "8. Source of every metric".
+LEADING_NUMBER = re.compile(r"^\s*[0-9]+(?:\.[0-9]+)*\.?\s+")
+
+# How far back a negator may sit and still be negating the verdict. Two words, roughly: past that
+# the negator is about something else in the same sentence. The window is also cut at the nearest
+# punctuation, so "not perfect, but the gate is Present" is not read as a negation of "Present".
+NEGATION_WINDOW = 28
+# Named distinctly from the NEGATORS tuple near the top of this module. They used to share a
+# name, and because this definition is executed later it silently rebound the tuple: the moment
+# `phrase_present` found a phrase with allow_negated=False it tried to iterate a compiled pattern
+# and raised TypeError, taking the whole gate down. Nothing caught it because that branch is only
+# reached when a phrase actually matches, which no manifest had done yet.
+NEGATION_RE = re.compile(r"(?i)(?<![0-9a-z])(?:not|no|never|without|neither|nor|nothing|n't|"
+                         r"rather than|instead of|far from|lacks|lacking|fails to)(?![0-9a-z])")
+
+
+def heading_id(attrs: str) -> str:
+    match = ID_ATTR.search(attrs or "")
+    if not match:
+        return ""
+    return (match.group(1) or match.group(2) or match.group(3) or "").strip()
+
+
+def verdict_text(html: str) -> str:
+    """The reader's text of a fragment, folded for phrase matching.
+
+    visible_text() is reused deliberately: A12 must read exactly what A5 reads, tooltips included,
+    or a verdict hidden in a title= attribute would be out of jurisdiction the way a stale figure
+    once was. Whitespace runs collapse, because markup between two words arrives here as a newline
+    and the indentation of the next inline element. BLOCK_BOUNDARY is left alone, and it is not
+    whitespace, so a declared phrase can never match across a paragraph or a table cell: two cells
+    reading "the gate is" and "Absent" are two cells, not a sentence.
+    """
+    return re.sub(r"\s+", " ", visible_text(html)).casefold()
+
+
+def phrase_positions(text: str, phrase: str) -> list:
+    """Every offset in `text` where `phrase` reads as a phrase and not as part of a longer word.
+
+    Word-boundary anchored at whichever end is alphanumeric, so "Present" does not match inside
+    "Presented" and "None" does not match inside "Nonetheless". Both sides are already casefolded
+    by verdict_text; the phrase is folded and whitespace-collapsed here to match.
+    """
+    needle = re.sub(r"\s+", " ", phrase or "").strip().casefold()
+    if not needle:
+        return []
+    pattern = re.escape(needle)
+    if needle[0].isalnum():
+        pattern = r"(?<![0-9A-Za-z])" + pattern
+    if needle[-1].isalnum():
+        pattern = pattern + r"(?![0-9A-Za-z])"
+    return [mo.start() for mo in re.finditer(pattern, text)]
+
+
+def negated_at(text: str, pos: int) -> bool:
+    """Whether the words immediately before `pos` negate what follows.
+
+    Narrow on purpose. The window is short and it is cut at the nearest punctuation or block
+    boundary, so the negator has to be governing THIS phrase rather than sitting somewhere in the
+    same sentence. It exists because the substring rule alone reads "the accuracy gate is not
+    Present" as carrying the verdict "Present".
+    """
+    window = text[max(0, pos - NEGATION_WINDOW):pos]
+    window = re.split(r"[.;:,()\x00]", window)[-1]
+    return bool(NEGATION_RE.search(window))
+
+
+def document_sections(html: str) -> list:
+    """Every heading in the document, with the span of the section it opens.
+
+    A section runs from its own heading to the next heading OF THE SAME OR HIGHER RANK, so the
+    subsections under section 8 are part of section 8, which is what a reader means by "in
+    section 8". The heading itself is inside the span: a verdict stated in the heading counts.
+    """
+    heads = [(int(mo.group(1)), heading_id(mo.group(2)),
+              re.sub(r"\s+", " ", strip_to_visible(mo.group(3))).strip(), mo.start())
+             for mo in HEADING_BLOCK.finditer(html)]
+    out = []
+    for index, (rank, hid, title, start) in enumerate(heads):
+        end = len(html)
+        for later_rank, _hid, _title, later_start in heads[index + 1:]:
+            if later_rank <= rank:
+                end = later_start
+                break
+        out.append({"rank": rank, "id": hid, "title": title, "start": start, "end": end})
+    return out
+
+
+def section_matches(section: dict, name: str) -> bool:
+    """Three spellings of "where", because an author has three natural ones and all are checkable.
+
+    The anchor id (`sec-8` or `8`), the section number as printed ("8", which matches the heading
+    "8. Source of every metric" and NOT "8.1 Anything"), or the heading's own title with any
+    leading number removed.
+    """
+    want = str(name or "").strip()
+    if not want:
+        return False
+    folded = want.casefold()
+    if section["id"] and section["id"].casefold() in (folded, ("sec-" + want).casefold()):
+        return True
+    title = section["title"]
+    if re.match(r"(?i)%s\.?(?:\s|$)" % re.escape(want), title):
+        return True
+    return LEADING_NUMBER.sub("", title).casefold() == folded
+
+
+def check_verdicts(m: dict, rendered: Path | None, f: Findings) -> None:
+    """A12: a verdict the manifest declares is the verdict the document carries.
+
+    THE CONTRACT.
+
+        m["verdicts"] = [
+          {"id": "scorecard_accuracy",          # unique within the manifest
+           "section": "8",                      # anchor id, section number, or heading title
+           "expected": "Present",               # must appear in that section
+           "contradicts": ["Absent", "no accuracy gate"],   # must appear NOWHERE in the document
+           "why": "the gate has existed since v5.0",        # required, non-empty
+           # optional, and the one exemption there is:
+           "quoted_in": [{"section": "26", "why": "the correction note quotes what it corrects"}]},
+        ]
+
+    A contradicting phrase has to be distinctive enough to be searched document-wide. A verdict
+    cell reading just "None" is not, and the answer is a cell that says what it means, not a
+    looser check: "None" as a document-wide phrase would fire on the word wherever it fell.
+
+    `quoted_in` exists because CORRECTIONS ARE CONTENT here. An edition that overturns a verdict
+    prints the old wording beside the new one, which means the document deliberately contains the
+    exact phrase the manifest calls a contradiction, and without a named exemption A12 and the
+    correction habit would be in direct conflict. It is narrow the way coverage.allow is: it names
+    ONE section, it records why, the section has to exist, and an exemption that removes nothing is
+    reported as stale, because a hole nobody can see the size of is a hole that grows.
+
+    `contradicts` is required and must be non-empty, for the same reason `why` is. A verdict with
+    nothing that would falsify it is not a declaration: "Present" appears in section 8 was true of
+    the defective edition as well, because section 24 said the gate passed while three OTHER cells
+    said it did not exist. The contradicting family is the half that catches those cells, and a
+    verdict that declares none is a check that cannot fail.
+
+    WHAT IT CATCHES, precisely.
+
+      1. The declared verdict is not in the section that is supposed to carry it. Either the cell
+         was never written, or it was rewritten into something else.
+      2. A contradicting phrase appears ANYWHERE in the document, section 8 included. This is the
+         defect above: three stale cells, one correct section, every number reconciling. It is
+         checked document-wide rather than cell by cell precisely because nobody knew which cells
+         were stale, which is why they survived three editions.
+      3. Every occurrence of the verdict inside its section is directly negated ("the gate is not
+         Present"). Without this, the substring rule reads a flat denial as a confirmation.
+      4. A declaration that cannot fail: no `why`, no `contradicts`, a contradicting phrase that
+         is part of `expected` (which could never be absent while `expected` is present), a
+         duplicate id, a section that is no heading in the document, an exemption with no reason
+         or over a span nobody can locate, and an exemption that removes nothing.
+
+    WHAT IT CANNOT SEE, honestly.
+
+      1. A CONTRADICTION NOBODY ENUMERATED. This is the big one. The check knows the phrasings the
+         manifest lists. A fourth cell saying "quality is unmeasured here" is invisible unless
+         someone adds that phrasing. It is a family test, not a semantic one: it converts "find
+         every cell that disagrees" into "list the ways this could be denied", which is a job an
+         author can actually do, and it catches every RECURRENCE of a denial once seen.
+      2. WHETHER THE VERDICT IS TRUE. It reads the document against the manifest, not against the
+         machine. `expected: "Absent"` for a gate that ran is checked as diligently as the truth.
+         The evidence rungs and G1 to G3 are what tie a verdict to an artefact; this ties the
+         document to the declaration.
+      3. PARAPHRASE. "The accuracy gate is present" (lower case, different wording) satisfies an
+         `expected` of "Present" only because "present" is a substring of it; a section that says
+         "we do gate accuracy" and never uses the declared word is reported as missing the verdict.
+         The failure direction is a false error, which an author sees and fixes.
+      4. NEGATION IT DOES NOT RECOGNISE. The window is two words and the negator list is fixed.
+         "The claim that the gate is Present is something this report no longer stands behind"
+         passes.
+      5. TONE, HEDGING, AND PLACEMENT WITHIN THE SECTION. A verdict in a footnote of section 8
+         counts as being in section 8.
+      6. ANY DOCUMENT BUT THE ONE IT IS GIVEN. Companion pages are judged by DOC_CHECKS, which
+         does not include A12, so a contradicting cell on a companion page is out of jurisdiction.
+      7. WHATEVER `quoted_in` EXEMPTS. It is a whole section, which is coarse: a stale verdict
+         cell that happens to sit in the section where corrections are quoted is not seen. The
+         exemption is visible in the manifest, it must say why, and it is reported when it stops
+         removing anything, which is the most a named hole can offer.
+    """
+    entries = m.get("verdicts")
+    if entries is None:
+        return
+    if not isinstance(entries, list):
+        f.error("A12", "verdicts must be a list of verdict objects, found %s"
+                       % type(entries).__name__)
+        return
+
+    declared, seen = [], set()
+    for index, entry in enumerate(entries):
+        where = "verdicts[%d]" % index
+        if not isinstance(entry, dict):
+            f.error("A12", "%s is not an object with id, section, expected, contradicts and why"
+                           % where)
+            continue
+        vid = str(entry.get("id") or "").strip()
+        if not vid:
+            f.error("A12", "%s declares no id, so no finding about it can name it" % where)
+            continue
+        where = "verdict %s" % vid
+        if vid in seen:
+            f.error("A12", "%s is declared twice. Two verdicts under one id cannot both be "
+                           "reported on." % where, verdict=vid)
+            continue
+        seen.add(vid)
+        section = str(entry.get("section") or "").strip()
+        expected = entry.get("expected")
+        why = entry.get("why")
+        contradicts = entry.get("contradicts")
+        bad = False
+        if not section:
+            f.error("A12", "%s names no section. A verdict with no place to be is not checkable "
+                           "against a document." % where, verdict=vid)
+            bad = True
+        if not (isinstance(expected, str) and expected.strip()):
+            f.error("A12", "%s declares no expected verdict. Give it `expected`, the words the "
+                           "document must carry." % where, verdict=vid)
+            bad = True
+        if not (isinstance(why, str) and why.strip()):
+            f.error("A12", "%s records no reason. A verdict that does not say why it is the "
+                           "verdict is not a declaration, it is a preference." % where,
+                    verdict=vid)
+            bad = True
+        if not isinstance(contradicts, list) or not [c for c in contradicts
+                                                     if isinstance(c, str) and c.strip()]:
+            f.error("A12", "%s declares no contradicting phrases. `contradicts` is a non-empty "
+                           "list of the ways this verdict could be denied, and it is required: a "
+                           "verdict whose only test is that its own words appear somewhere is a "
+                           "check that cannot fail. It passed on the edition where three cells "
+                           "said the opposite." % where, verdict=vid)
+            bad = True
+            contradicts = []
+        phrases = []
+        for item in (contradicts if isinstance(contradicts, list) else []):
+            if not (isinstance(item, str) and item.strip()):
+                f.error("A12", "%s lists a contradicting phrase that is not a non-empty string "
+                               "(%r)" % (where, item), verdict=vid)
+                bad = True
+                continue
+            if isinstance(expected, str) and phrase_positions(
+                    re.sub(r"\s+", " ", expected).casefold(), item):
+                f.error("A12", "%s lists %r as contradicting it, and that phrase is part of its "
+                               "own expected verdict %r. The declaration could never pass: the "
+                               "words that satisfy it also deny it." % (where, item, expected),
+                        verdict=vid)
+                bad = True
+                continue
+            phrases.append(item)
+        quoted = []
+        raw_quoted = entry.get("quoted_in") or []
+        if not isinstance(raw_quoted, list):
+            f.error("A12", "%s declares quoted_in as %s. It is a list of {section, why} objects."
+                           % (where, type(raw_quoted).__name__), verdict=vid)
+            bad = True
+            raw_quoted = []
+        for item in raw_quoted:
+            if not isinstance(item, dict) or not str(item.get("section") or "").strip():
+                f.error("A12", "%s exempts %r from its contradicting phrases and names no "
+                               "section" % (where, item), verdict=vid)
+                bad = True
+                continue
+            if not (isinstance(item.get("why"), str) and item["why"].strip()):
+                f.error("A12", "%s exempts section %r from its contradicting phrases and records "
+                               "no reason. An exemption that does not say why is a silenced check."
+                               % (where, item.get("section")), verdict=vid)
+                bad = True
+                continue
+            quoted.append({"section": str(item["section"]).strip(), "why": item["why"].strip()})
+        if not bad:
+            declared.append({"id": vid, "section": section, "expected": expected.strip(),
+                             "why": why.strip(), "contradicts": phrases, "quoted_in": quoted})
+
+    if not declared:
+        return
+    if not (rendered and rendered.exists()):
+        # A check that cannot fire, printed as a check that passed, is the thing this file exists
+        # to prevent. Say it instead.
+        f.warn("A12", "%d verdict(s) are declared and no rendered document was supplied, so "
+                      "nothing read whether the document carries them. A verdict checked against "
+                      "the manifest that declares it is unfalsifiable." % len(declared))
+        return
+
+    html = rendered.read_text(encoding="utf-8", errors="replace")
+    sections = document_sections(html)
+
+    def context(text: str, pos: int, width: int = 60) -> str:
+        return re.sub(r"\s+", " ",
+                      text[max(0, pos - width):pos + width]).replace(BLOCK_BOUNDARY, " / ").strip()
+
+    for v in declared:
+        found = [s for s in sections if section_matches(s, v["section"])]
+        if not found:
+            names = [s["id"] or s["title"] for s in sections if s["id"] or s["title"]]
+            f.error("A12", "%s names section %r, which is no heading in the rendered document, so "
+                           "nothing was read for it. The document's headings are: %s%s"
+                           % ("verdict %s" % v["id"], v["section"], ", ".join(names[:10]),
+                              "..." if len(names) > 10 else ""), verdict=v["id"])
+        elif len(found) > 1:
+            f.error("A12", "verdict %s names section %r and %d headings answer to that name (%s). "
+                           "The declaration does not say which span to read; name the heading's "
+                           "anchor id instead."
+                           % (v["id"], v["section"], len(found),
+                              ", ".join(s["id"] or s["title"] for s in found[:4])),
+                    verdict=v["id"])
+        else:
+            section = found[0]
+            text = verdict_text(html[section["start"]:section["end"]])
+            hits = phrase_positions(text, v["expected"])
+            if not hits:
+                f.error("A12", "section %r does not carry the verdict %r that the manifest "
+                               "declares for it (verdict %s, declared because %s). The section "
+                               "was read as %d visible characters and the words are not in them."
+                               % (section["title"] or section["id"], v["expected"], v["id"],
+                                  v["why"], len(text)), verdict=v["id"])
+            elif all(negated_at(text, pos) for pos in hits):
+                f.error("A12", "section %r states the verdict %r only under a negation, in all %d "
+                               "place(s) it appears, so the document says the opposite of verdict "
+                               "%s. Context: %s"
+                               % (section["title"] or section["id"], v["expected"], len(hits),
+                                  v["id"], context(text, hits[0])), verdict=v["id"])
+        # The exempt spans, resolved the same way the verdict's own section is, then cut out of
+        # the text the contradicting phrases are searched in. Each cut becomes a block boundary,
+        # so removing a span cannot glue the words either side of it into a phrase that was never
+        # on the page.
+        exempt = []
+        for quote in v["quoted_in"]:
+            here = [s for s in sections if section_matches(s, quote["section"])]
+            if len(here) != 1:
+                f.error("A12", "verdict %s exempts section %r from its contradicting phrases and "
+                               "%s. An exemption over a span nobody can locate exempts an unknown "
+                               "amount of the document."
+                               % (v["id"], quote["section"],
+                                  "that is no heading in the rendered document" if not here
+                                  else "%d headings answer to that name" % len(here)),
+                        verdict=v["id"])
+                continue
+            exempt.append((here[0], quote))
+        scanned, spans = html, []
+        # Merged first. A subsection's span sits inside its parent's, and cutting the inner one
+        # would leave the outer one's end offset pointing at text that has moved.
+        for start, end in sorted({(s["start"], s["end"]) for s, _q in exempt}):
+            if spans and start <= spans[-1][1]:
+                spans[-1][1] = max(spans[-1][1], end)
+            else:
+                spans.append([start, end])
+        for start, end in reversed(spans):
+            scanned = scanned[:start] + "<hr>" + scanned[end:]
+        document = verdict_text(scanned)
+        for section, quote in exempt:
+            quoted_text = verdict_text(html[section["start"]:section["end"]])
+            if not any(phrase_positions(quoted_text, p) for p in v["contradicts"]):
+                f.warn("A12", "verdict %s exempts section %r as quoting its contradicting phrases "
+                              "(%s) and not one of them appears there. A stale exemption is a "
+                              "claim about the report that is no longer true; delete it."
+                              % (v["id"], quote["section"], quote["why"]), verdict=v["id"])
+        for phrase in v["contradicts"]:
+            positions = phrase_positions(document, phrase)
+            if not positions:
+                continue
+            f.error("A12", "the document says %r, which the manifest declares contradicts verdict "
+                           "%s (%r, because %s). %d occurrence(s). Context: %s"
+                           % (phrase, v["id"], v["expected"], v["why"], len(positions),
+                              " // ".join(context(document, p) for p in positions[:2])),
+                    verdict=v["id"])
+
+
 ACCEPTANCE_FIELDS = ("claim", "claims", "keys", "block", "table", "figure", "level", "run",
                      "numeral", "unit", "quantity", "label")
 
@@ -2688,6 +3079,7 @@ def verify(manifest: dict, previous: dict | None = None, rendered: Path | None =
     check_gate(manifest, f, manifest_dir)
     check_render(manifest, rendered, f)
     check_coverage(manifest, rendered, f)
+    check_verdicts(manifest, rendered, f)
     # Last, so it can only ever move a warning this run actually produced.
     apply_accepted_warnings(manifest, f)
     return f

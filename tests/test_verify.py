@@ -1597,5 +1597,266 @@ class TestUnicodeSpaceSeparators(Case):
         self.assertEqual(self.found(f, "A5"), [], self.messages(f, "A5"))
 
 
+# --------------------------------------------------------------------------------------
+# A12: the verdicts, which are the half a numeric gate cannot police
+
+
+def verdict(**over):
+    v = {"id": "scorecard_accuracy", "section": "8", "expected": "Present, but not a figure of "
+         "merit", "contradicts": ["Absent, the real hole", "no accuracy gate"],
+         "why": "the accuracy gate has run beside every performance measurement since v5.0"}
+    v.update(over)
+    return v
+
+
+class A12Case(Case):
+    """Shared plumbing for the verdict checks: a two-section document with named anchors."""
+
+    SECTION_8 = ('<h2 id="sec-8">8. Source of every metric</h2>'
+                 '<table><tr><th>Metric</th><th>Fit</th></tr>'
+                 '<tr><td>Accuracy</td><td>%s</td></tr></table>')
+    SECTION_21 = ('<h2 id="sec-21">21. The accuracy gate</h2>'
+                  '<p>The gate ran beside the performance measurements and every case passed.</p>')
+
+    def report(self, scorecard="Present, but not a figure of merit", extra=""):
+        return self.document(self.SECTION_8 % scorecard + self.SECTION_21 + extra)
+
+    def a12(self, manifest, doc):
+        return self.messages(self.run_verify(manifest, doc), "A12")
+
+
+class TestA12TheRealDefect(A12Case):
+    """The defect this whole check exists for, reconstructed from the edition that shipped it.
+
+    Three cells asserted there was no accuracy gate while another section reported that gate
+    running and passing. It survived three editions with every number in the document reconciling
+    perfectly, because the manifest governed digits and had no opinion about verdicts.
+    """
+
+    def test_the_v8_9_state_is_caught(self):
+        """Section 8 says the gate is the real hole, section 21 says it passed. Fails."""
+        m = base_manifest(verdicts=[verdict()])
+        doc = self.report(scorecard="Absent, the real hole")
+        printed = self.a12(m, doc)
+        self.assertIn("Absent, the real hole", printed)
+        self.assertIn("does not carry the verdict", printed)
+        self.assertTrue(self.run_verify(m, doc).errors)
+
+    def test_the_corrected_state_passes(self):
+        """The negative control. The same manifest against the document that fixed the cells."""
+        m = base_manifest(verdicts=[verdict()])
+        f = self.run_verify(m, self.report())
+        self.assertEqual(self.found(f, "A12"), [], self.messages(f, "A12"))
+
+    def test_a_contradiction_anywhere_in_the_document_is_caught(self):
+        """The half that would have caught it. Section 8 carries the right verdict and a THIRD
+        cell, three sections away, still says the old thing. Cell-by-cell checking misses this;
+        the contradicting family does not, and nobody had to know which cell was stale."""
+        m = base_manifest(verdicts=[verdict()])
+        doc = self.report(extra='<h2 id="sec-2">2. Figures of merit</h2>'
+                                "<p>The gap at the top of the roadmap: there is "
+                                "no accuracy gate here at all.</p>")
+        printed = self.a12(m, doc)
+        self.assertIn("no accuracy gate", printed)
+        self.assertIn("contradicts verdict scorecard_accuracy", printed)
+
+
+class TestA12ReadsTheDocument(A12Case):
+    """Jurisdiction. Every one of these would pass a check that read the manifest."""
+
+    def test_a_verdict_missing_from_its_section_is_caught(self):
+        m = base_manifest(verdicts=[verdict()])
+        self.assertIn("does not carry the verdict",
+                      self.a12(m, self.report(scorecard="Adequate")))
+
+    def test_the_verdict_must_be_in_the_section_it_names(self):
+        """Right words, wrong place. The document carries the verdict in section 21 and section 8
+        is where the manifest says the reader will meet it."""
+        m = base_manifest(verdicts=[verdict()])
+        doc = self.document(self.SECTION_8 % "Adequate" + self.SECTION_21
+                            + "<p>Accuracy is Present, but not a figure of merit.</p>")
+        self.assertIn("does not carry the verdict", self.a12(m, doc))
+
+    def test_a_subsection_is_part_of_its_section(self):
+        """A section runs to the next heading of the same or higher rank, which is what a reader
+        means by "in section 8"."""
+        m = base_manifest(verdicts=[verdict()])
+        doc = self.document(self.SECTION_8 % "see below"
+                            + "<h3>8.1 Accuracy</h3><p>Present, but not a figure of merit.</p>"
+                            + self.SECTION_21)
+        self.assertEqual(self.a12(m, doc), "")
+
+    def test_a_contradiction_in_a_tooltip_is_in_jurisdiction(self):
+        """A5 reads attribute values because the omission attack hid a stale figure in one. A
+        stale verdict hides there just as well."""
+        m = base_manifest(verdicts=[verdict()])
+        doc = self.report(extra='<p title="no accuracy gate is run here">Quality.</p>')
+        self.assertIn("no accuracy gate", self.a12(m, doc))
+
+    def test_a_negated_verdict_is_not_a_verdict(self):
+        """The hole a plain substring rule leaves: the section contains the words and denies them.
+        Reported only when EVERY occurrence is negated."""
+        m = base_manifest(verdicts=[verdict(expected="Present")])
+        doc = self.document(self.SECTION_8 % "the gate is not Present" + self.SECTION_21)
+        self.assertIn("only under a negation", self.a12(m, doc))
+
+    def test_a_negation_earlier_in_the_sentence_is_not_a_negation_of_the_verdict(self):
+        """The false positive the negation guard must not have. The window is short and it stops
+        at punctuation, so "not a figure of merit, but Present" reads as the affirmation it is."""
+        m = base_manifest(verdicts=[verdict(expected="Present")])
+        doc = self.document(self.SECTION_8 % "not a figure of merit, but Present" + self.SECTION_21)
+        self.assertEqual(self.a12(m, doc), "")
+
+    def test_one_affirmation_beside_a_negation_is_enough(self):
+        m = base_manifest(verdicts=[verdict(expected="Present")])
+        doc = self.document(self.SECTION_8 % "Present"
+                            + "<p>It was not Present before version 5.0.</p>" + self.SECTION_21)
+        self.assertEqual(self.a12(m, doc), "")
+
+    def test_a_verdict_word_inside_a_longer_word_does_not_count(self):
+        """Word-boundary anchored, so "Presented" is not "Present"."""
+        m = base_manifest(verdicts=[verdict(expected="Present")])
+        doc = self.document(self.SECTION_8 % "Presented in section 21" + self.SECTION_21)
+        self.assertIn("does not carry the verdict", self.a12(m, doc))
+
+    def test_a_phrase_cannot_match_across_a_block_boundary(self):
+        """Two table cells reading "the gate is" and "Absent" are two cells, not a sentence. The
+        same reasoning A5 uses for a numeral and its unit."""
+        m = base_manifest(verdicts=[verdict(expected="Present", contradicts=["gate is Absent"])])
+        doc = self.document(self.SECTION_8 % "Present"
+                            + "<table><tr><td>the gate is</td><td>Absent</td></tr></table>"
+                            + self.SECTION_21)
+        self.assertEqual(self.a12(m, doc), "")
+
+    def test_a_section_can_be_named_by_number_id_or_title(self):
+        m = base_manifest()
+        for name in ("8", "sec-8", "Source of every metric"):
+            m["verdicts"] = [verdict(section=name)]
+            self.assertEqual(self.a12(m, self.report()), "", "section named %r" % name)
+
+    def test_a_section_number_does_not_match_its_subsections(self):
+        """"8" is section 8, not section 8.1, or the declaration would silently widen."""
+        m = base_manifest(verdicts=[verdict(section="8")])
+        doc = self.document('<h2 id="a">8.1 Accuracy</h2><p>Present, but not a figure of merit.</p>')
+        self.assertIn("no heading in the rendered document", self.a12(m, doc))
+
+    def test_a_section_that_is_no_heading_is_reported(self):
+        m = base_manifest(verdicts=[verdict(section="41")])
+        self.assertIn("no heading in the rendered document", self.a12(m, self.report()))
+
+    def test_an_ambiguous_section_name_is_reported(self):
+        """Two spans answering to one name means the declaration does not say which to read."""
+        m = base_manifest(verdicts=[verdict(section="8")])
+        doc = self.document(self.SECTION_8 % "Present, but not a figure of merit"
+                            + '<h2 id="sec-8">8. Source of every metric</h2><p>Again.</p>')
+        self.assertIn("headings answer to that name", self.a12(m, doc))
+
+
+class TestA12DeclarationShape(A12Case):
+    """A declaration that cannot fail is not a declaration. Same standard as coverage.allow."""
+
+    def test_a_verdict_with_no_why_is_rejected(self):
+        m = base_manifest(verdicts=[verdict(why="  ")])
+        self.assertIn("records no reason", self.a12(m, self.report()))
+
+    def test_a_verdict_with_no_contradicting_phrases_is_rejected(self):
+        """The one that matters most. "Present appears in section 8" was TRUE of the defective
+        edition, so a verdict with no contradicting family is a check that cannot fail."""
+        for empty in ([], None, "Absent"):
+            m = base_manifest(verdicts=[verdict(contradicts=empty)])
+            self.assertIn("declares no contradicting phrases", self.a12(m, self.report()),
+                          "contradicts=%r" % (empty,))
+
+    def test_a_contradicting_phrase_inside_the_expected_verdict_is_rejected(self):
+        """It could never be absent while the verdict is present: the words that satisfy the
+        declaration also deny it."""
+        m = base_manifest(verdicts=[verdict(expected="Present, but not a figure of merit",
+                                            contradicts=["not a figure of merit"])])
+        self.assertIn("could never pass", self.a12(m, self.report()))
+
+    def test_a_verdict_with_no_id_or_a_duplicate_id_is_rejected(self):
+        m = base_manifest(verdicts=[verdict(id=""), verdict(), verdict()])
+        printed = self.a12(m, self.report())
+        self.assertIn("declares no id", printed)
+        self.assertIn("is declared twice", printed)
+
+    def test_verdicts_that_are_not_a_list_of_objects_are_rejected(self):
+        self.assertIn("must be a list", self.a12(base_manifest(verdicts={"a": 1}), self.report()))
+        self.assertIn("is not an object", self.a12(base_manifest(verdicts=["Present"]),
+                                                   self.report()))
+
+    def test_a_verdict_with_no_document_says_it_was_not_checked(self):
+        """A check that cannot fire must not print as a check that passed."""
+        f = self.run_verify(base_manifest(verdicts=[verdict()]))
+        self.assertIn("no rendered document was supplied", self.messages(f, "A12"))
+        self.assertTrue(self.found(f, "A12", "warn"))
+
+    def test_no_verdicts_declared_fires_nothing(self):
+        """The negative control for the whole check. A manifest that declares none is not
+        policed by A12, which is what A10's declaration floor is for."""
+        f = self.run_verify(base_manifest(), self.report(scorecard="Absent, the real hole"))
+        self.assertEqual(self.found(f, "A12"), [])
+
+
+class TestA12QuotedCorrections(A12Case):
+    """Corrections are content: an edition that overturns a verdict prints the old wording."""
+
+    CORRECTION = ('<h2 id="sec-26">26. Version history</h2>'
+                  '<p>The correction: the metric scorecard read "Absent, the real hole" and it '
+                  'was written before version 5.0 added the gate.</p>')
+
+    def test_an_unexempted_quotation_of_the_old_verdict_fires(self):
+        m = base_manifest(verdicts=[verdict()])
+        self.assertIn("Absent, the real hole", self.a12(m, self.report(extra=self.CORRECTION)))
+
+    def test_a_named_exemption_with_a_reason_clears_it(self):
+        m = base_manifest(verdicts=[verdict(quoted_in=[
+            {"section": "26", "why": "the correction note quotes the cell it corrects"}])])
+        self.assertEqual(self.a12(m, self.report(extra=self.CORRECTION)), "")
+
+    def test_the_exemption_covers_only_the_section_it_names(self):
+        """It is a named hole, not a document-wide one: the same words elsewhere still fire."""
+        m = base_manifest(verdicts=[verdict(quoted_in=[
+            {"section": "26", "why": "the correction note quotes the cell it corrects"}])])
+        doc = self.report(scorecard="Absent, the real hole", extra=self.CORRECTION)
+        self.assertIn("Absent, the real hole", self.a12(m, doc))
+
+    def test_an_exemption_with_no_reason_or_no_section_is_rejected(self):
+        m = base_manifest(verdicts=[verdict(quoted_in=[{"section": "26"}])])
+        self.assertIn("records no reason", self.a12(m, self.report(extra=self.CORRECTION)))
+        m = base_manifest(verdicts=[verdict(quoted_in=[{"why": "because"}])])
+        self.assertIn("names no section", self.a12(m, self.report(extra=self.CORRECTION)))
+
+    def test_an_exemption_over_a_section_that_does_not_exist_is_rejected(self):
+        m = base_manifest(verdicts=[verdict(quoted_in=[
+            {"section": "99", "why": "quotes the old cell"}])])
+        self.assertIn("no heading in the rendered document",
+                      self.a12(m, self.report(extra=self.CORRECTION)))
+
+    def test_an_exemption_that_removes_nothing_is_reported_as_stale(self):
+        """A hole nobody can see the size of is a hole that grows."""
+        m = base_manifest(verdicts=[verdict(quoted_in=[
+            {"section": "21", "why": "quotes the old cell"}])])
+        f = self.run_verify(m, self.report(extra=self.CORRECTION))
+        self.assertIn("stale exemption", self.messages(f, "A12"))
+
+
+class TestA12OnTheDeclarationFloor(Case):
+    """A10 over verdicts: deleting a verdict is how a caught contradiction comes back silently."""
+
+    def test_dropping_a_verdict_with_no_changelog_row_is_an_error(self):
+        from gpubench import longform
+        previous = base_manifest(verdicts=[verdict()])
+        findings = longform.check_declaration_floor(base_manifest(), previous)
+        printed = " ".join(item["message"] for item in findings)
+        self.assertIn("declared verdict(s)", printed)
+        self.assertIn("scorecard_accuracy", printed)
+
+    def test_keeping_it_is_clean(self):
+        from gpubench import longform
+        manifest = base_manifest(verdicts=[verdict()])
+        self.assertEqual(longform.check_declaration_floor(manifest, manifest), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

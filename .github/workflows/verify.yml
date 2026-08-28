@@ -1,0 +1,218 @@
+# Every push runs the seven test suites and the claims verifier.
+#
+# NO GPU IS INVOLVED ANYWHERE IN THIS FILE, and that is a property of the code rather than a
+# compromise made for CI. The orchestrator never touches CUDA: it ships probes to a target and
+# parses what comes back, so every suite is device-free by construction and runs against recorded
+# fixtures. tools/verify_claims.py reads JSON. A green run here therefore means the same thing it
+# would mean on a machine with two cards in it.
+#
+# NOTHING IS INSTALLED EITHER. There is no `pip install` step below, on purpose: gpubench is pure
+# standard library and every suite is unittest, so the absence of an install step is the check.
+# Add one and the property stops being tested.
+#
+# The suites run as SEPARATE JOBS rather than one loop. Each gets its own runner, which is the
+# closest CI equivalent of the house rule that they run one at a time on an idle machine. It
+# matters most for serving, which asserts on timing.
+#
+# ONE SUITE IS EXPECTED TO FAIL ON A CLEAN RUNNER, AND IT IS SAYING SOMETHING TRUE.
+# tests/test_gate.py defines TestDocumentTitleExtraction, whose five tests import
+# gpubench.longform.docx_export, which imports python-docx at module scope with no guard. On a
+# developer machine that already has python-docx they pass and nobody notices; on a clean runner
+# they raise ModuleNotFoundError. The suite already carries the right pattern for this at
+# HAVE_PYTHON_DOCX and HAVE_FITZ, which is how fifteen other tests skip cleanly, so the fix is a
+# @unittest.skipUnless(HAVE_PYTHON_DOCX, ...) on that class. This workflow deliberately does NOT
+# pip install the package to make the red go away: the whole claim being tested here is that the
+# project needs nothing installed, and buying a green run with an install would retire the only
+# check that would ever have caught this.
+
+name: verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # The six fast suites. One job each, so a failure names the suite without anyone reading a log.
+  suites:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [analysis, diagnose, gate, verify, attacks, template]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # test_template is a unittest suite with its own entry point and a count floor, so it is
+      # invoked as a module rather than discovered. The other five are ordinary TestCase modules.
+      - name: run tests.test_${{ matrix.suite }}
+        run: |
+          if [ "${{ matrix.suite }}" = "template" ]; then
+            python -m tests.test_template
+          else
+            python -m unittest -v tests.test_${{ matrix.suite }}
+          fi
+
+  # Serving is separated for a measurement reason, not a scheduling one: it takes about four
+  # minutes and it asserts on timing, so it gets a runner to itself rather than sharing one with
+  # five other suites.
+  serving:
+    name: serving
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: run tests.test_serving
+        run: python -m unittest -v tests.test_serving
+
+  # The claims verifier, which is the check the gate cannot make: it rebuilds derived claims from
+  # the raw result artefacts instead of from the manifest's own values.
+  claims:
+    name: claims
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The selftest is not a smoke test. It plants a measured value that no artefact contains and
+      # requires the verifier to report UNGROUNDED, which is precisely the tampering an internally
+      # consistent manifest hides. If the verifier ever stops catching it, this job goes red.
+      - name: verify_claims selftest
+        run: python tools/verify_claims.py --selftest
+
+      # A real manifest lives in the report repository, not this one, so there is nothing here to
+      # verify by default and this step says so rather than passing silently. Set CLAIMS_MANIFEST
+      # (and CLAIMS_ROOT when the run paths are relative to somewhere else) in a checkout that has
+      # one, and the same verifier runs against real artefacts.
+      - name: verify a real manifest when one is present
+        env:
+          CLAIMS_MANIFEST: ${{ vars.CLAIMS_MANIFEST }}
+          CLAIMS_ROOT: ${{ vars.CLAIMS_ROOT }}
+        run: |
+          if [ -z "$CLAIMS_MANIFEST" ]; then
+            echo "SKIPPED: no CLAIMS_MANIFEST configured."
+            echo "This repository ships the tool, not the report. The manifest and its result"
+            echo "artefacts live in the report repository, so there is nothing real to rebuild"
+            echo "here. The selftest above is what runs instead, and it is a fixture."
+            exit 0
+          fi
+          if [ ! -f "$CLAIMS_MANIFEST" ]; then
+            echo "CLAIMS_MANIFEST is set to $CLAIMS_MANIFEST, which does not exist."
+            exit 1
+          fi
+          if [ -n "$CLAIMS_ROOT" ]; then
+            python tools/verify_claims.py "$CLAIMS_MANIFEST" --root "$CLAIMS_ROOT" \
+                   --json claims-verification.json
+          else
+            python tools/verify_claims.py "$CLAIMS_MANIFEST" --json claims-verification.json
+          fi
+
+      - name: upload the verification record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: claims-verification
+          path: claims-verification.json
+          if-no-files-found: ignore
+
+  # reproduce.py exercised against the worked example already in the repository. This runs no
+  # benchmark: --rehash re-reads a result file, pulls out the environment it recorded, hashes
+  # every artefact and writes the reproduction record. It is the whole tool except the measuring,
+  # which is the part that needs hardware.
+  reproduction-record:
+    name: reproduction record
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: the plan and the pins, with nothing run
+        run: python tools/reproduce.py --out-dir /tmp/explain --explain
+
+      - name: build a record over the worked example
+        run: |
+          mkdir -p /tmp/repro
+          cp examples/results/onprem-2x5090.json /tmp/repro/result.json
+          python tools/reproduce.py --out-dir /tmp/repro --rehash
+
+      # A record that cannot detect a changed environment is decoration. This proves the drift
+      # check fires, using the same record it just wrote as the baseline.
+      - name: prove the drift check catches a changed driver
+        run: |
+          mkdir -p /tmp/repro2
+          python - <<'PY'
+          import json
+          result = json.load(open('/tmp/repro/result.json'))
+          result['probes']['inventory']['gpus'][0]['driver_version'] = '000.00.00'
+          json.dump(result, open('/tmp/repro2/result.json', 'w'))
+          PY
+          if python tools/reproduce.py --out-dir /tmp/repro2 --rehash \
+               --expect /tmp/repro/reproduction.json; then
+            echo "FAIL: a changed driver version was not reported as drift"
+            exit 1
+          fi
+          echo "the drift check reported the changed driver and exited non-zero, as it should"
+
+      - name: upload the reproduction record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproduction-record
+          path: /tmp/repro/reproduction.json
+          if-no-files-found: ignore
+
+  # pyproject declares requires-python >= 3.8. GitHub's current ubuntu runner image no longer
+  # ships 3.8, so the lowest version checked here is 3.9. That gap is stated rather than papered
+  # over: 3.8 is claimed and is NOT tested by this workflow.
+  version-floor:
+    name: version floor (3.9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: every shipped module parses
+        run: |
+          python - <<'PY'
+          import glob, py_compile, sys
+          bad = []
+          for path in sorted(glob.glob('gpubench/**/*.py', recursive=True)) + \
+                      sorted(glob.glob('tools/*.py')):
+              try:
+                  py_compile.compile(path, cfile='/tmp/out.pyc', doraise=True)
+              except py_compile.PyCompileError as exc:
+                  bad.append(str(exc))
+          for line in bad:
+              print(line)
+          sys.exit(1 if bad else 0)
+          PY
+      - name: the tools run on the floor interpreter
+        run: |
+          python tools/verify_claims.py --selftest
+          python tools/reproduce.py --out-dir /tmp/floor --explain

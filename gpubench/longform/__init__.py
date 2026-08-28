@@ -386,6 +386,13 @@ def check_declaration_floor(manifest, previous):
           _sequence_ids(manifest.get("figures"), "figure"),
           _sequence_ids(previous.get("figures"), "figure"),
           len(manifest.get("figures") or []), len(previous.get("figures") or []))
+    # A12's declarations are on the floor for the same reason the others are: deleting a verdict
+    # is how a contradiction the gate already caught comes back silently. The check disappears
+    # with the declaration, and nothing inside the manifest records that it ever existed.
+    floor("declared verdict(s)",
+          _sequence_ids(manifest.get("verdicts"), "verdict"),
+          _sequence_ids(previous.get("verdicts"), "verdict"),
+          len(manifest.get("verdicts") or []), len(previous.get("verdicts") or []))
 
     # Count ASSERTIONS, not blocks. Popping the "assert" key from all seven prose blocks while
     # keeping their ids and their text left every count above unchanged and disarmed the only part

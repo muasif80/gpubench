@@ -7,12 +7,15 @@ This document describes two files and nothing else:
 
 | File | What it contributes |
 |---|---|
-| `gpubench/verify.py` | 29 check ids (`manifest`, A1 to A9, B1, C1, C2, D1 to D7, E1, E2, F1 to F4, G1 to G3) |
-| `gpubench/longform/__init__.py` | 1 check id (A10, the declaration floor), plus the gate driver that runs all 30 |
+| `gpubench/verify.py` | 30 check ids (`manifest`, A1 to A9, A12, B1, C1, C2, D1 to D7, E1, E2, F1 to F4, G1 to G3) |
+| `gpubench/longform/__init__.py` | 2 check ids (A10, the declaration floor, and A11, the undeclared-output warning), plus the gate driver that runs all 32 |
 
-**Total: 30 check ids.** The count comes from grepping the two files for the id passed to
-`Findings.error` / `Findings.warn` (verify.py) and to the local `error()` helper
-(longform/__init__.py). The cross-check at the end of this document lists both directions.
+**Total: 32 check ids, and 31 of them have an entry below.** A11 has none, and an earlier edition
+of this document said in as many words that A11 did not exist. It does, in
+`longform/__init__.py`, and the article build prints it. The count comes from grepping the two
+files for the id passed to `Findings.error` / `Findings.warn` (verify.py) and to the local
+`error()` helper (longform/__init__.py). The cross-check at the end of this document lists both
+directions, including that gap.
 
 Audience: an engineer who wants to emit a manifest this gate accepts, and who has never seen the
 tool. Everything stated here was read out of the code or reproduced by running it.
@@ -97,7 +100,7 @@ Each entry has five fields.
 ## Summary
 
 Jurisdiction: **M** manifest, **D** rendered document, **A** external result artefact,
-**P** previous edition's manifest.
+**P** previous edition's manifest, **O** the output directory.
 
 | Id | Name | Severity | Jur. | Waivable |
 |---|---|---|---|---|
@@ -112,6 +115,8 @@ Jurisdiction: **M** manifest, **D** rendered document, **A** external result art
 | A8 | A measurement names a run that exists | error, warn | M | the out-of-window warning, by `claim` + `run` |
 | A9 | `kind` is earned, not chosen | error | M | no |
 | A10 | An edition may not declare less than the last | error | M, P | no |
+| A11 | Nothing undeclared appears in the output directory (**no entry below**, see the cross-check) | warn | O | no |
+| A12 | A rendered verdict is the verdict that was declared | error, warn | D | no |
 | B1 | Nothing derived is ever typed | error | M | no |
 | C1 | Basis hygiene | error, warn | M | the mixed-basis-ratio warning, by `claim` |
 | C2 | Unit hygiene | error, warn | M | the same-family warning, by `claim` |
@@ -553,6 +558,94 @@ that exists but cannot be parsed is a hard failure (`read_manifest` raises), bec
 quietly into "no baseline" is exactly the state in which a shrunken manifest sails through. It also
 cannot see a claim that stayed, kept its kind, and had its value replaced by a worse one: that is
 A4's changelog check, and it needs the same baseline.
+
+## A12 : the verdict a section carries is the verdict declared for it
+
+**SEVERITY** error, for every case except two. The stale-exemption finding and the
+no-document finding are warnings. Not waivable: the findings carry `verdict`, which is not one of
+`ACCEPTANCE_FIELDS`, so an acceptance could only ever name the check, and an acceptance that names
+no identity field takes exactly one finding.
+
+**JURISDICTION** **RENDERED DOCUMENT.** It reads `visible_text()`, the same text A5 reads, tooltips
+included, and it locates the declared section by walking the document's own headings. It does not
+read the manifest's `prose` list, for the reason A5 does not: a declaration checked against another
+declaration is unfalsifiable.
+
+**WHAT IT CATCHES** a VERDICT that contradicts another verdict in the same document. Every check
+above this one polices digits. Three cells of this project's own report asserted that there was no
+accuracy gate while another section reported that same gate running and passing; it survived three
+editions, and every number in the document reconciled perfectly the whole time. Reproduced against
+the two rendered documents in `article/public`, with one verdict declared:
+
+```
+  [ERROR] A12  section '8. Source of every metric' does not carry the verdict 'Present, but not a figure of merit' that the manifest declares for it (verdict scorecard_accuracy, declared because the accuracy gate has run beside every performance measurement since v5.0 and section 21 publishes its cases). The section was read as 16608 visible characters and the words are not in them.
+  [ERROR] A12  the document says 'the real hole', which the manifest declares contradicts verdict scorecard_accuracy ('Present, but not a figure of merit', because ...). 1 occurrence(s). Context: d, which it was not before.  /   /   /   /  accuracy  /   /  absent  /   /  the real hole. everything here measures speed, so a stack th
+  [ERROR] A12  the document says 'at the top of the roadmap', which the manifest declares contradicts verdict scorecard_accuracy (...). 1 occurrence(s). Context: p would all show up as an improvement. section 21 puts this at the top of the roadmap.  /   /   /  3. system under test  /   /   /
+```
+
+The same declaration against the corrected edition prints nothing.
+
+**HOW TO SATISFY IT** declare the verdict, where it lives, and the ways it could be denied:
+
+```json
+"verdicts": [
+  {"id": "scorecard_accuracy",
+   "section": "8",
+   "expected": "Present, but not a figure of merit",
+   "contradicts": ["the real hole", "at the top of the roadmap"],
+   "why": "the accuracy gate has run beside every performance measurement since v5.0",
+   "quoted_in": [{"section": "Version history",
+                  "why": "the version history quotes the three cells this edition corrected"}]}
+]
+```
+
+- **`section`** may be the heading's anchor id (`sec-8`), the section number as printed (`8`,
+  which matches the heading "8. Source of every metric" and **not** "8.1 Accuracy"), or the
+  heading's own title with any leading number removed. A section runs from its heading to the next
+  heading of the **same or higher rank**, so subsections are part of it. A name no heading answers
+  to, or one that two headings answer to, is an error.
+- **`expected`** must appear in that section, matched on the reader's text: whitespace collapsed,
+  case folded, anchored at word boundaries so `Present` is not found inside `Presented`. A phrase
+  cannot match across a block boundary, so two table cells reading "the gate is" and "Absent" stay
+  two cells. If **every** occurrence in the section is directly negated ("the gate is not
+  Present"), that is an error too: the window is two words and stops at punctuation, so "not a
+  figure of merit, but Present" reads as the affirmation it is.
+- **`contradicts`** is **required and non-empty**, matched the same way, over the **whole
+  document**. This is the half that catches the real defect, and the reason it is required: "the
+  verdict appears in section 8" was true of the defective edition as well. A phrase has to be
+  distinctive enough to search document-wide; a verdict cell reading just `None` is not, and the
+  answer is a cell that says what it means rather than a looser check.
+- **`why`** is required and non-empty. A verdict that does not say why it is the verdict is a
+  preference, not a declaration. Same standard as a `coverage.allow` entry.
+- **`quoted_in`** is the one exemption, and it exists because corrections are content here: an
+  edition that overturns a verdict prints the old wording beside the new one, so the document
+  deliberately contains the phrase the manifest calls a contradiction. It names ONE section, it
+  records why, the section must exist, and an exemption that removes nothing is reported as stale.
+- A contradicting phrase that is **part of `expected`** is an error: the words that satisfy the
+  declaration would also deny it, so it could never pass.
+- Deleting a verdict between editions is an A10 error unless a changelog row names it.
+
+**WHAT IT CANNOT SEE** seven things, in order of how much they matter.
+
+1. **A contradiction nobody enumerated.** This is the big one. The check knows the phrasings the
+   manifest lists. A fourth cell saying "quality is unmeasured here" is invisible until someone
+   adds that phrasing. It is a family test, not a semantic one: it turns "find every cell that
+   disagrees" into "list the ways this could be denied", which is a job an author can do, and it
+   catches every recurrence of a denial once one has been seen.
+2. **Whether the verdict is true.** It reads the document against the manifest, not against the
+   machine. `expected: "Absent"` for a gate that ran is checked exactly as diligently. G1 to G3 and
+   the evidence rungs are what tie a verdict to an artefact.
+3. **Paraphrase.** A section that says "we do gate accuracy" and never uses the declared words is
+   reported as missing the verdict. The failure direction is a false error, which an author sees.
+4. **Negation it does not recognise.** The window is two words and the negator list is fixed.
+   "The claim that the gate is Present is something this report no longer stands behind" passes.
+5. **Whatever `quoted_in` exempts**, which is a whole section: a stale cell inside the section
+   where corrections are quoted is not seen. The hole is named, reasoned and reported when it stops
+   removing anything, which is the most a named hole can offer.
+6. **Companion pages.** They are judged by `DOC_CHECKS`, which does not include A12, so a
+   contradicting cell on a companion page is out of jurisdiction.
+7. **Tone, hedging and placement.** A verdict in a footnote of section 8 counts as being in
+   section 8, and a verdict stated once beside four paragraphs undermining it passes.
 
 ## B1 : nothing derived is ever typed
 
@@ -1234,6 +1327,15 @@ construction and cannot be written to swallow a whole check. Matchable fields:
 `claim, claims, keys, block, table, figure, level, run, numeral, unit, quantity, label`. Accepted
 warnings are printed in their own section and counted separately. Errors are never suppressible.
 
+## `verdicts` : list
+
+`[{"id", "section", "expected", "contradicts", "why", "quoted_in"}]`, read by A12 and counted by
+A10's declaration floor. `id` is unique, `section` names a heading in the rendered document,
+`expected` is the wording that section must carry, `contradicts` is a **non-empty** list of the
+phrasings that must appear nowhere in the document, and `why` is a **non-empty** reason. Optional
+`quoted_in` is `[{"section", "why"}]`, exempting one named section from the contradicting phrases
+so a correction may quote what it corrects. Every rule and every blind spot is in the A12 entry.
+
 ## `gate` : object
 
 | Field | Read by | Notes |
@@ -1551,14 +1653,24 @@ wrong and go looking for the reason.
 Performed by grepping the two files for every id passed to a finding constructor, then checking
 both directions. Both directions are clean.
 
-**Every id in the code is documented here.** 29 ids in `gpubench/verify.py`
-(`grep -oE '"(A|B|C|D|E|F|G)[0-9]+"|"manifest"'`, unique): `manifest`, A1, A2, A3, A4, A5, A6, A7,
-A8, A9, B1, C1, C2, D1, D2, D3, D4, D5, D6, D7, E1, E2, F1, F2, F3, F4, G1, G2, G3. Plus A10 in
-`gpubench/longform/__init__.py` (`check_declaration_floor`, `"check": "A10"`). Total 30, and this
-document has an entry for each.
+**Every id in the code is documented here, with one named exception.** 30 ids in
+`gpubench/verify.py` (`grep -oE '"(A|B|C|D|E|F|G)[0-9]+"|"manifest"'`, unique): `manifest`, A1, A2,
+A3, A4, A5, A6, A7, A8, A9, A12, B1, C1, C2, D1, D2, D3, D4, D5, D6, D7, E1, E2, F1, F2, F3, F4,
+G1, G2, G3. Plus A10 and A11 in `gpubench/longform/__init__.py` (`check_declaration_floor`,
+`"check": "A10"`; `check_output_directory`, `"check": "A11"`). Total 32, and this document has an
+entry for 31 of them.
 
-**Every id documented here exists in the code.** No entry above was written for an id that does not
-appear in one of the two files. There is no A11, no B2, no C3, no D8, no E3, no F5 and no G4, and
+**CORRECTION.** This section previously read "There is no A11 ... and none is documented", and the
+first half of that was wrong. A11 is emitted by `check_output_directory` in
+`longform/__init__.py`, it is armed whenever the caller passes `expected_outputs` (the article CLI
+does), and it printed on the build that produced the quoted A12 output above: `claims gate: A11: 6
+file(s) in the output directory were written by neither the engine nor declared by the manifest`.
+The cause was the same one A12 exists for: the sentence was a verdict about the catalogue, nothing
+checked verdicts, and every count around it was consistent. A11 still has no entry of its own; that
+is now a stated gap rather than a denial.
+
+**Every other id documented here exists in the code.** No entry above was written for an id that
+does not appear in one of the two files. There is no B2, no C3, no D8, no E3, no F5 and no G4, and
 none is documented.
 
 **Not the same catalogue:** `gpubench/template/lint.py` uses ids L1 to L11 and a separate D1 to D12
@@ -1579,21 +1691,24 @@ python -c "from gpubench.longform import check_declaration_floor; ..."   # A10, 
 Test suites covering these checks, all passing at the time of writing:
 
 ```
-python -m tests.test_verify    87 tests
-python -m tests.test_gate      67 tests
+python -m tests.test_verify   192 tests
+python -m tests.test_gate     167 tests
 python -m tests.test_attacks   30 tests   # the 23 attacks that once landed, each still failing
 ```
 
 The tests assert on `finding["check"]`, so the ids they name can be counted. Together the three
-suites name **21 of the 30 ids**: `manifest`, A1, A3, A4, A5, A6, A7, A8, A9, A10, B1, D2, D3, D4,
-D6, D7, E2, F2, F3, F4, G3.
+suites name **26 of the 32 ids**: `manifest`, A1, A3, A4, A5, A6, A7, A8, A9, A10, A11, A12, B1,
+D1, D2, D3, D4, D6, D7, E2, F1, F2, F3, F4, G1, G3.
 
-The other 9 have **no id-named assertion** in any of the three: A2, C1, C2, D1, D5, E1, F1, G1, G2.
-Five of them (A2, C1, E1, G1, G2) fire in the `--demo` fixture, which is a command a person runs
-and not a test. Four (C2, D1, D5, F1) fire in neither the demo nor an id-named test, so their
-behaviour in this document was established by reading the code and by the one-off reproductions
-quoted above rather than by a suite. That gap is worth closing; see the note in this file's
-companion `README.md`.
+The other 6 have **no id-named assertion** in any of the three: A2, C1, C2, D5, E1, G2. Four of
+them (A2, C1, E1, G2) fire in the `--demo` fixture, which is a command a person runs and not a
+test. Two (C2, D5) fire in neither the demo nor an id-named test, so their behaviour in this
+document was established by reading the code and by the one-off reproductions quoted above rather
+than by a suite. That gap is worth closing; see the note in this file's companion `README.md`.
+
+Counts above were produced by running the three suites and by grepping them for quoted check ids;
+the previous edition of this paragraph stated 87 and 67 tests and a 21-of-30 coverage figure, all
+of which had gone stale.
 
 
 ---
@@ -1614,7 +1729,7 @@ the gate, not by a reader.
 
 A **determined** author cannot be stopped by a check the author configures. The manifest is written
 by the same person as the document, so any exemption the manifest can grant, that person can grant
-themselves. Eight routes below follow from that and are documented rather than closed, because
+themselves. Nine routes below follow from that and are documented rather than closed, because
 closing one moves the exemption somewhere else rather than removing it. Three adversarial passes
 against this gate each ended by finding a new variant of a route the previous one had closed.
 
@@ -1623,7 +1738,7 @@ two editions is small, structured and human-readable, and the declaration floor 
 that shrinks fail rather than pass. Read the diff. Every route below is visible in it as a
 deliberate act: an added allowance, a removed formula, a widened tolerance, a new waiver.
 
-## The eight
+## The nine
 
 **R6, an equality group's tolerance is unbounded, and declaring the group also suppresses A7.**
 A group says two claims should agree and states how closely. The author chooses that tolerance and
@@ -1669,6 +1784,14 @@ A figure may declare that its table view lives with another figure. F3 checks th
 renders a non-empty table, not that the table holds the sharing figure's values. **Requires:**
 naming a figure you know does not carry your rows. **Visible as:** a `table_view_shared_with` entry.
 
+**R22, `quoted_in` exempts a whole section from a verdict's contradicting phrases.**
+A12 searches the document for the phrasings that would deny a declared verdict, and one exemption
+exists so a correction may quote what it corrects. It is section-sized, so a stale verdict cell
+that sits in the exempted section is not seen, and an author who wants a denial to survive can put
+it there. **Requires:** naming a section you know carries a live denial rather than a quoted one.
+**Visible as:** a `quoted_in` entry, which must name a section and record a reason, and which the
+gate reports as stale the moment it stops removing anything.
+
 **R19, CSS generated content is not text.**
 A `content:` declaration in a stylesheet renders on the page and is not in the document text, so no
 numeral check sees it. **Requires:** writing a stylesheet rule that prints a figure. **Visible as:**
@@ -1676,12 +1799,12 @@ nothing in the manifest; a reviewer would have to read the stylesheet.
 
 ## What that adds up to
 
-Two of the eight (R15, R19) are invisible in the manifest and would have to be caught by reading the
-document or its stylesheet. The other six are visible as a specific, deliberate edit. So the honest
+Two of the nine (R15, R19) are invisible in the manifest and would have to be caught by reading the
+document or its stylesheet. The other seven are visible as a specific, deliberate edit. So the honest
 summary is:
 
 > A number that no measurement supports cannot reach a published document by accident. It can be put
-> there on purpose by whoever writes the manifest, and six of the eight ways to do it leave a mark in
+> there on purpose by whoever writes the manifest, and seven of the nine ways to do it leave a mark in
 > a diff a reviewer can read.
 
 State it that way rather than "verified", which claims more than any gate its author configures can
