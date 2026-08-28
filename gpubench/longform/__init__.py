@@ -221,8 +221,14 @@ KIND_EVIDENCE = {"measured": 3, "derived": 3, "published": 2, "supplied": 2,
 
 # Changelog fields that waive a declaration regression. A row naming the id is the whole point:
 # dropping a claim is legitimate and has to be a sentence someone wrote, not an absence.
+# A10 waives a removal when a changelog row NAMES the id. The floor applies to verdicts and tables
+# as well as claims, so those need somewhere honest to be named: without `verdicts_removed` the
+# only way to retire a verdict was to list its id under `claims_removed`, which files a change to
+# the document's conclusions as a change to its numbers. The waiver has to be as specific as the
+# thing being waived or the changelog stops being readable as a record.
 CHANGELOG_WAIVER_FIELDS = ("claims_changed", "claims_remeasured", "claims_removed",
-                           "prose_removed", "figures_removed")
+                           "prose_removed", "figures_removed", "verdicts_removed",
+                           "tables_removed")
 
 
 def read_manifest(path):

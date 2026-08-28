@@ -103,8 +103,14 @@ UNIT_FACTORS = {
     "GB/s": ((1e9, "bytes/s to GB/s"),),
     "TB/s": ((1e12, "bytes/s to TB/s"),),
     "TFLOPS": ((1e12, "FLOP/s to TFLOPS"), (1000.0, "GFLOPS to TFLOPS")),
-    "s": ((1000.0, "ms to s"),),
-    "ms": ((0.001, "s to ms"),),
+    # Profilers report in nanoseconds and documents read in milliseconds, so a kernel-trace claim
+    # is almost always a scaled copy of what the artefact holds. Without the ns entries the
+    # verifier reported UNGROUNDED for a figure that was sitting in the artefact all along, which
+    # is a false alarm of exactly the kind that teaches an operator to ignore the tool.
+    "s": ((1000.0, "ms to s"), (1e6, "us to s"), (1e9, "ns to s")),
+    "ms": ((0.001, "s to ms"), (1000.0, "us to ms"), (1e6, "ns to ms")),
+    "us": ((1000.0, "ns to us"), (0.001, "ms to us")),
+    "ns": ((0.001, "us to ns"),),
     "%": ((0.01, "fraction to percent"),),
 }
 

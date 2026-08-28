@@ -1744,5 +1744,52 @@ class TestTheHealthyCasesStillPass(unittest.TestCase):
                       arr["latency_grew_over_the_level_basis"])
 
 
+class PercentileBlockCarriesItsOwnResolution(unittest.TestCase):
+    """A p99 is only as real as the number of samples underneath it.
+
+    The saturation run that prompted this emitted a clean, monotonically rising p50 and p95 and no
+    p99 at all, which is the one percentile a capacity decision turns on. Emitting it is easy; the
+    part worth testing is that a level too short to resolve a tail says so instead of printing the
+    maximum under a percentile's name.
+    """
+
+    def test_p99_is_emitted_alongside_p50_and_p95(self):
+        from gpubench.probes.serving import dist
+
+        d = dist([float(i) for i in range(1, 201)])
+        self.assertEqual(d["n"], 200)
+        self.assertLess(d["p50"], d["p95"])
+        self.assertLess(d["p95"], d["p99"])
+        self.assertLessEqual(d["p99"], d["max"])
+
+    def test_the_scale_applies_to_every_percentile_not_just_the_mean(self):
+        """itl_ms converts seconds to milliseconds, and a partly-scaled block is worse than none."""
+        from gpubench.probes.serving import dist
+
+        secs = [0.001 * i for i in range(1, 101)]
+        d = dist(secs, scale=1000.0)
+        for key in ("mean", "p50", "p95", "p99", "max"):
+            self.assertGreater(d[key], 0.9, "%s looks unscaled: %r" % (key, d[key]))
+
+    def test_a_short_level_reports_the_finest_percentile_it_can_support(self):
+        from gpubench.probes.serving import finest_resolvable_pct
+
+        # 20 samples cannot put anything above a 99th percentile cut, and say so.
+        self.assertAlmostEqual(finest_resolvable_pct(20), 95.0)
+        self.assertAlmostEqual(finest_resolvable_pct(100), 99.0)
+        self.assertAlmostEqual(finest_resolvable_pct(1000), 99.9)
+        self.assertIsNone(finest_resolvable_pct(1))
+        self.assertIsNone(finest_resolvable_pct(0))
+
+    def test_an_empty_sample_yields_nulls_rather_than_zeroes(self):
+        """A zero latency reads as a fast level. A null reads as no measurement, which is true."""
+        from gpubench.probes.serving import dist
+
+        d = dist([])
+        for key in ("mean", "p50", "p95", "p99", "max", "finest_resolvable_pct"):
+            self.assertIsNone(d[key], key)
+        self.assertEqual(d["n"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

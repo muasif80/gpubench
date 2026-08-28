@@ -709,7 +709,7 @@ provenance* against the artifact block.
 
 ## Testing
 
-Six suites ship, and every one runs without a device, a network or a third-party package, from a
+Ten suites ship, and every one runs without a device, a network or a third-party package, from a
 clean extraction of the release archive.
 
 ```bash
@@ -719,8 +719,19 @@ python -m tests.test_serving                   # the load generator
 python -m tests.test_verify                    # the gate's 30 checks, individually
 python -m tests.test_gate                      # the gate inside a real build
 python -m tests.test_attacks                   # attempts to defeat the gate
+python -m tests.test_redact_control            # proof the redaction gate can fail
+python -m tests.test_docx_header_repeat        # reads the produced .docx, not the code
+python -m tests.test_verify_claims             # the grounder, including its negative controls
+python -m tests.test_svg_table_id              # a declared table is findable in the output
 python -m gpubench.template.tests.test_lint    # the report linter
 ```
+
+`test_redact_control` is the answer to a question worth asking of any gate: has it ever actually
+failed? It plants one of every class the redaction gate screens for and requires each back by name,
+then asserts the two paths that once returned PASS while reading nothing now refuse instead.
+`test_docx_header_repeat` unzips the document it just produced, because the bug it guards against
+was an assignment python-docx silently accepted and never wrote, which changed nothing in 64 tables
+while the build log reported success.
 
 `tests/test_attacks.py` is the one worth reading rather than only running. It is the **permanent
 record of the ways this tool was fooled**: each test reproduces one evidenced hole from the two

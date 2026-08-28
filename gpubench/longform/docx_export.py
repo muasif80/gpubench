@@ -24,6 +24,10 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
+# Pure text handling, kept in a module with no third-party import so it stays testable
+# without the .docx writer present. Re-exported here because callers import it from this module.
+from .doctitle import H1_TAG, TITLE_TAG, document_title  # noqa: F401
+
 INK = RGBColor(0x0B, 0x0B, 0x0B)
 INK2 = RGBColor(0x3A, 0x39, 0x37)
 MUTED = RGBColor(0x6B, 0x69, 0x64)
@@ -184,6 +188,27 @@ def _fit_to_page(table_obj):
         pr.append(el)
 
 
+def repeat_header(row):
+    """Make a header row repeat on every page the table spans.
+
+    Bold and shaded makes a row LOOK like a header on the page it starts on. Word only REPEATS it
+    across a page break when the row's properties carry w:tblHeader, and without that a reader who
+    scrolls into the continuation of a long table sees unlabelled columns. This report has several
+    tables longer than a page, so it is not hypothetical.
+
+    Written as XML because python-docx 1.2.0 has no such property: assigning
+    `row.repeat_as_header_row = True` silently creates a new Python attribute and emits nothing,
+    which is how the first attempt at this "passed" while changing zero of 64 tables. Found by
+    unzipping the shipped .docx and counting w:tblHeader, not by reading the build log.
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    tr_pr = row._tr.get_or_add_trPr()
+    if tr_pr.find(qn("w:tblHeader")) is None:
+        tr_pr.append(OxmlElement("w:tblHeader"))
+
+
 def render_table(doc, node):
     heads = [plain(th).strip() for th in find(node, "th")]
     rows = []
@@ -213,6 +238,7 @@ def render_table(doc, node):
             r.font.size = Pt(9)
             r.font.color.rgb = INK
             shade(cell, SURFACE)
+        repeat_header(t.rows[0])
     for tds in rows:
         cells = t.add_row().cells
         for i, td in enumerate(tds[:ncols]):
@@ -374,29 +400,6 @@ def shade_paragraph(p):
     el.set(qn("w:val"), "clear")
     el.set(qn("w:fill"), SURFACE)
     pr.append(el)
-
-
-TITLE_TAG = re.compile(r"(?is)<title\b[^>]*>(.*?)</title>")
-H1_TAG = re.compile(r"(?is)<h1\b[^>]*>(.*?)</h1>")
-
-
-def document_title(html, fallback=""):
-    """The document's own title, from its <title> or its <h1>. Never this module's opinion of it.
-
-    WHAT WAS WRONG. main() wrote one particular benchmark report's title and subject into the core
-    properties of whatever it was pointed at. Every other document exported through it therefore
-    described itself, in the Word properties pane and in every search index that reads them, as
-    that benchmark report. A converter is a converter: the only thing it knows about the document
-    is what the document says.
-    """
-    for pattern in (TITLE_TAG, H1_TAG):
-        m = pattern.search(html or "")
-        if m:
-            text = re.sub(r"\s+", " ", re.sub(r"(?s)<[^>]+>", "", m.group(1))).strip()
-            text = unescape(text)
-            if text:
-                return text
-    return fallback
 
 
 def main(argv=None, title=None, subject=""):

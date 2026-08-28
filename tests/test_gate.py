@@ -1637,7 +1637,11 @@ class TestDocumentTitleExtraction(unittest.TestCase):
     """The pure function behind it, so the rule is testable without python-docx installed."""
 
     def title(self, html, fallback=""):
-        from gpubench.longform.docx_export import document_title
+        # Imported from doctitle, NOT docx_export: the latter imports python-docx at module scope,
+        # so on a clean runner this class raised ModuleNotFoundError before reaching an assertion
+        # and the docstring above was false. The rule is pure text handling and now lives somewhere
+        # that says so.
+        from gpubench.longform.doctitle import document_title
 
         return document_title(html, fallback)
 

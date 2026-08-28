@@ -1,4 +1,4 @@
-# Every push runs the seven test suites and the claims verifier.
+# Every push runs the eleven test suites and the claims verifier.
 #
 # NO GPU IS INVOLVED ANYWHERE IN THIS FILE, and that is a property of the code rather than a
 # compromise made for CI. The orchestrator never touches CUDA: it ships probes to a target and
@@ -14,16 +14,26 @@
 # closest CI equivalent of the house rule that they run one at a time on an idle machine. It
 # matters most for serving, which asserts on timing.
 #
-# ONE SUITE IS EXPECTED TO FAIL ON A CLEAN RUNNER, AND IT IS SAYING SOMETHING TRUE.
-# tests/test_gate.py defines TestDocumentTitleExtraction, whose five tests import
-# gpubench.longform.docx_export, which imports python-docx at module scope with no guard. On a
-# developer machine that already has python-docx they pass and nobody notices; on a clean runner
-# they raise ModuleNotFoundError. The suite already carries the right pattern for this at
-# HAVE_PYTHON_DOCX and HAVE_FITZ, which is how fifteen other tests skip cleanly, so the fix is a
-# @unittest.skipUnless(HAVE_PYTHON_DOCX, ...) on that class. This workflow deliberately does NOT
-# pip install the package to make the red go away: the whole claim being tested here is that the
+# A SUITE USED TO FAIL HERE ON A CLEAN RUNNER, AND THE FIX WAS NOT TO SKIP IT.
+# tests/test_gate.py's TestDocumentTitleExtraction says in its own docstring that it tests the
+# pure function "so the rule is testable without python-docx installed", and it was not: it
+# imported the function from gpubench.longform.docx_export, which imports python-docx at module
+# scope and builds RGBColor constants at import time, so on a clean runner the class raised
+# ModuleNotFoundError before reaching an assertion.
+#
+# The obvious repair was @unittest.skipUnless(HAVE_PYTHON_DOCX, ...), which would have turned the
+# job green by no longer running the test, and left the docstring's claim false. The rule is pure
+# text handling, so it moved to gpubench/longform/doctitle.py, which imports nothing but `re` and
+# `html.unescape`; docx_export re-exports the names so existing imports keep working. Now the
+# sentence is true and the test runs here.
+#
+# tests/test_docx_header_repeat.py genuinely cannot run without the writer, because it asserts on
+# the bytes of a produced .docx, and it skips rather than failing. That is the honest use of a
+# skip: nothing to check, and it says so, where a pass would lie.
+#
+# This workflow still deliberately does NOT pip install anything. The claim under test is that the
 # project needs nothing installed, and buying a green run with an install would retire the only
-# check that would ever have caught this.
+# check that would ever catch that changing.
 
 name: verify
 
@@ -44,7 +54,11 @@ defaults:
     shell: bash
 
 jobs:
-  # The six fast suites. One job each, so a failure names the suite without anyone reading a log.
+  # The ten fast suites. One job each, so a failure names the suite without anyone reading a log.
+  #
+  # docx_header_repeat skips itself when python-docx is absent, which is the normal state of a
+  # clean runner. That is deliberate: it asserts against the bytes of a produced .docx, so there is
+  # nothing it can honestly check without the writer, and skipping says so where a pass would lie.
   suites:
     name: ${{ matrix.suite }}
     runs-on: ubuntu-latest
@@ -52,14 +66,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [analysis, diagnose, gate, verify, attacks, template]
+        suite: [analysis, diagnose, gate, verify, attacks, template,
+                redact_control, docx_header_repeat, verify_claims, svg_table_id]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       # test_template is a unittest suite with its own entry point and a count floor, so it is
-      # invoked as a module rather than discovered. The other five are ordinary TestCase modules.
+      # invoked as a module rather than discovered. The other nine are ordinary TestCase modules.
       - name: run tests.test_${{ matrix.suite }}
         run: |
           if [ "${{ matrix.suite }}" = "template" ]; then

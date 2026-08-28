@@ -52,11 +52,22 @@ def esc(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+def esc_attr(s):
+    """Escape for an ATTRIBUTE value, which `esc` does not do.
+
+    `esc` handles &, < and >, which is right for text content and wrong inside quotes: a value
+    containing a double quote closes the attribute early and everything after it is parsed as
+    markup. Nothing here takes hostile input, but ids and titles are author-supplied strings that
+    land inside quotes, and the failure is silent -- the page simply renders wrong.
+    """
+    return esc(s).replace('"', "&quot;").replace("'", "&#39;")
+
+
 def svg_open(w=W, h=H, title=""):
     return ('<svg viewBox="0 0 %d %d" width="100%%" role="img" aria-label="%s" '
             'xmlns="http://www.w3.org/2000/svg"><style>%s</style>'
             '<rect class="surface" x="0" y="0" width="%d" height="%d"/>'
-            % (w, h, esc(title), SVG_STYLE, w, h))
+            % (w, h, esc_attr(title), SVG_STYLE, w, h))
 
 
 def svg_close():
@@ -144,8 +155,17 @@ def marker(x, y, cls, tip, r=4.5):
             % (cls, x, y, r, esc(tip)))
 
 
-def table(headers, rows, caption=""):
-    out = ['<div class="tablewrap"><table>']
+def table(headers, rows, caption="", tid=""):
+    """Render a table. `tid` puts an id on the <table>, which is what lets the gate check it.
+
+    Without an id, F4 can locate a declared table in the rendered document only when it happens to
+    sit inside a <figure> carrying the same id, so 20 tables declared in the manifest were reported
+    as "could not be found in the rendered document, so their cells were not checked against what
+    shipped". The declaration existed and the check silently had nothing to read, which is the
+    failure mode this whole gate exists to remove: pass the id and the cells get verified against
+    the page.
+    """
+    out = ['<div class="tablewrap"><table%s>' % (' id="%s"' % esc_attr(tid) if tid else "")]
     if caption:
         out.append("<caption>%s</caption>" % esc(caption))
     out.append("<thead><tr>" + "".join("<th>%s</th>" % esc(h) for h in headers) + "</tr></thead><tbody>")
@@ -173,7 +193,8 @@ def figure(fid, num, title, svg, note, tbl):
     return ('<figure id="%s"><div class="chart">%s</div>'
             '<figcaption><b>Figure %s.</b> %s</figcaption>'
             '%s<details><summary>Table view</summary>%s</details></figure>'
-            % (fid, svg, num, title, ("<p class='note'>%s</p>" % note) if note else "", tbl))
+            % (esc_attr(fid), svg, num, title,
+               ("<p class='note'>%s</p>" % note) if note else "", tbl))
 
 
 # ----------------------------------------------------------------------------- figures

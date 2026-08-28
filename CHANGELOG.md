@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.3.0
+
+Checks that read a declaration were replaced by checks that read the artifact. Every item below
+came from the same discovery: something reported success without having looked.
+
+- **The redaction gate refuses instead of passing when it cannot check.** Handed a file rather than
+  a directory it walked nothing and printed "PASS: 0 files scanned", which reads exactly like a
+  clean result. Given artifacts copied away from their denylist it ran the structural patterns and
+  skipped the half that catches a NAME, and passed an edition carrying an organisation name in
+  plain text. Both now exit non-zero and say which check did not run.
+- **`tests/test_redact_control.py`**, the proof that gate can fail: one planted instance of every
+  class it screens for, each required back by name, plus two negative controls so it is not merely
+  an unconditional failure. A gate that has only ever returned PASS is indistinguishable from a
+  gate that cannot fail.
+- **Header rows repeat across page breaks in exported .docx.** The first fix assigned
+  `row.repeat_as_header_row = True`; python-docx has no such property, so it silently created a
+  Python attribute, emitted nothing, and changed zero of 64 tables while the build log said
+  success. Now written as `w:tblHeader`, and **`tests/test_docx_header_repeat.py` unzips the
+  produced package and counts the element** rather than asserting the function was called, which
+  is the only form of the test that would have caught the original bug.
+- **Serving levels report p99, `max`, `n` and `finest_resolvable_pct`.** A saturation run came back
+  with a clean monotonic p50 and p95 and no p99 at all, which is the percentile a capacity decision
+  turns on. Summaries are kept rather than raw samples, so a missing percentile cannot be recovered
+  after the fact and the level has to be re-run. `finest_resolvable_pct` states what a given sample
+  count can actually support: 20 requests cannot resolve a p99, and printing one anyway is the
+  maximum wearing a percentile's name.
+- **Verdict declarations (`A12`)**: a verdict cell that disagrees with its declaration blocks the
+  render, so a conclusion cannot drift from the evidence it was drawn from.
+- **A raw-artefact claims verifier** (`tools/verify_claims.py`), which rebuilds derived claims from
+  the result files instead of from the manifest's own values, and whose `--selftest` plants a value
+  no artefact contains and requires UNGROUNDED back. An internally consistent manifest hides
+  exactly this.
+- **A reproduction record** (`tools/reproduce.py`) with a drift check proven in CI by mutating a
+  driver version and requiring a non-zero exit.
+- **Open-loop repeat spread is keyed by arrival rate, not concurrency.** Open-loop levels all carry
+  concurrency 1, so keying by it collapsed every rate into one bucket and compared unrelated levels.
+- **The claims verifier no longer reports a false UNGROUNDED across a unit change.** Its unit table
+  knew `s to ms` and not `ns to ms`, so a kernel-trace figure printed in milliseconds could not be
+  matched to the artefact holding it in nanoseconds, and two real claims were reported as
+  unsupported. ns and us conversions added for the time units, and `tests/test_verify_claims.py`
+  now covers the grounder, including the negative controls: a scale search that will multiply by
+  anything until something matches grounds every claim and verifies nothing.
+- **`svg.table(tid=...)`** puts an id on a rendered `<table>`, which is what lets F4 check its cells
+  against the page. Without it, a declared table was reported as "could not be found in the
+  rendered document", so the declaration existed and the check silently had nothing to read.
+- **`esc_attr()` for attribute values.** `esc()` escapes `&`, `<` and `>`, which is correct for text
+  and wrong inside quotes, and it was being used for `aria-label` and now for ids. Found by a test
+  written for the new table id, not by review.
+- **`verdicts_removed` and `tables_removed` are changelog waiver fields.** A10 waives a removal when
+  a changelog row names the id, and verdicts had nowhere honest to be named: retiring one meant
+  listing it under `claims_removed`, filing a change to the document's conclusions as a change to
+  its numbers.
+- **`document_title` moved to `gpubench/longform/doctitle.py`**, which imports nothing but `re` and
+  `html.unescape`. Its test asserted in its own docstring that the rule was "testable without
+  python-docx installed" and it was not: the import chain pulled in python-docx at module scope, so
+  on a clean runner the whole class raised `ModuleNotFoundError` before reaching an assertion. The
+  fix was to make the sentence true rather than to skip the test. `docx_export` re-exports the name.
+- CI runs eight suites, one job per suite, still with no `pip install` anywhere: the absence of an
+  install step is itself the check that the tool needs nothing installed.
+
 ## 1.2.0
 
 A report whose numbers disagree with each other can no longer be built.

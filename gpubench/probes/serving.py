@@ -95,6 +95,37 @@ def pct(values, p):
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+def finest_resolvable_pct(n):
+    """The highest percentile this many samples can express without inventing a tail.
+
+    A p99 drawn from 20 requests is the interpolated gap between the top two samples: it is the
+    maximum wearing a percentile's name, and it moves with a single slow request. The tail only
+    starts meaning something once at least one sample sits above the cut, which needs
+    n * (1 - p/100) >= 1, so p99 needs 100 requests and p999 needs 1000.
+
+    Reported beside every percentile block rather than enforced, because the caller who asked for
+    a short level should still see its numbers -- but nobody should quote a p99 without knowing
+    whether the level could resolve one.
+    """
+    if not n or n < 2:
+        return None
+    return 100.0 * (1.0 - 1.0 / n)
+
+
+def dist(values, scale=1.0):
+    """Percentile block for a latency sample, carrying the sample size that produced it."""
+    if not values:
+        return {"mean": None, "p50": None, "p95": None, "p99": None, "max": None,
+                "n": 0, "finest_resolvable_pct": None}
+    return {"mean": statistics.fmean(values) * scale,
+            "p50": (pct(values, 50) or 0.0) * scale,
+            "p95": (pct(values, 95) or 0.0) * scale,
+            "p99": (pct(values, 99) or 0.0) * scale,
+            "max": max(values) * scale,
+            "n": len(values),
+            "finest_resolvable_pct": finest_resolvable_pct(len(values))}
+
+
 def parse_url(url):
     u = urllib.parse.urlparse(url)
     return u.hostname, (u.port or (443 if u.scheme == "https" else 80)), u.scheme == "https", u.path.rstrip("/")
@@ -1605,13 +1636,13 @@ def run_level(args, concurrency, total_requests, in_tok=None, out_tok=None,
         "input_tokens": in_tokens,
         "output_tokens_per_s": out_tokens / wall if wall > 0 else None,
         "total_tokens_per_s": (out_tokens + in_tokens) / wall if wall > 0 else None,
-        "ttft_s": {"mean": statistics.fmean(ttfts) if ttfts else None,
-                   "p50": pct(ttfts, 50), "p95": pct(ttfts, 95), "max": max(ttfts) if ttfts else None},
-        "itl_ms": {"mean": statistics.fmean(all_itls) * 1000 if all_itls else None,
-                   "p50": (pct(all_itls, 50) or 0) * 1000 if all_itls else None,
-                   "p95": (pct(all_itls, 95) or 0) * 1000 if all_itls else None},
-        "e2e_s": {"mean": statistics.fmean(e2es) if e2es else None,
-                  "p50": pct(e2es, 50), "p95": pct(e2es, 95)},
+        # p99 and the sample count that produced it were added after a saturation run came back
+        # with a clean latency curve and no tail: p50 and p95 both climbed monotonically with the
+        # arrival rate, which is exactly where the 99th percentile is the number a capacity
+        # decision turns on, and it was the one percentile not being emitted.
+        "ttft_s": dist(ttfts),
+        "itl_ms": dist(all_itls, scale=1000.0),
+        "e2e_s": dist(e2es),
         "per_request_output_tokens_per_s": (
             statistics.fmean([r["completion_tokens"] / r["e2e_s"] for r in ok if r["e2e_s"] > 0]) if ok else None),
         "server_metrics_delta": server,
