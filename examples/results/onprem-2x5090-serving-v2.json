@@ -1,0 +1,465 @@
+{
+  "tool": "gpubench",
+  "started_at_utc": "2026-08-26T10:50:00Z",
+  "mode": "shared",
+  "profile": "base",
+  "schema_version": "1.0",
+  "probes": {
+    "serve_bench": {
+      "benchmark": "serve_bench",
+      "label": "",
+      "started_at_utc": "2026-08-26T10:46:42Z",
+      "config": {
+        "base_url": "http://127.0.0.1:8000/v1",
+        "model": "Qwen/Qwen3.6-27B-FP8",
+        "endpoint": "completions",
+        "concurrency": "1,2,4,8,16,32,64",
+        "requests": 32,
+        "requests_multiplier": 1.0,
+        "input_tokens": 512,
+        "output_tokens": 128,
+        "timeout": 600.0,
+        "warmup": 1,
+        "label": "",
+        "mode": "concurrency",
+        "input_lengths": "128,512,2048,8192,32768",
+        "output_lengths": "128,512"
+      },
+      "request_count_policy": "The number of requests at each level is rounded UP to a whole multiple of that level's concurrency. A partial final wave runs at lower concurrency than the level claims to measure and depresses its throughput, by an amount that depends on how badly the count divides -- so the error appears at some levels and not others and reads as scatter. Each level records requests_attempted, sample_count and whole_waves so the adjustment is auditable.",
+      "workload": {
+        "kind": "synthetic",
+        "template": "Request <salt>. <filler> \\n Summarize:",
+        "filler_token": "lorem",
+        "salt": "a distinct integer per request, placed FIRST so it cannot share a cached prefix with any other request",
+        "length_control": "requested length is in words; one filler word is approximately one BPE token. The engine's own prompt_tokens counter is what gets reported, and both values are recorded per level so the approximation is auditable rather than assumed.",
+        "why_synthetic": "exact length control, no licensing entanglement, and prefix-cache defeat by construction. The cost is that it says nothing about content-sensitive behaviour, so no quality claim may rest on it.",
+        "not_claimed": "This is not an MLPerf-style fixed dataset. MLPerf mandates specific corpora (OpenORCA, CNN-DailyMail) because the input distribution is part of the benchmark definition; results here are therefore comparable across runs of this tool, but not with MLPerf submissions."
+      },
+      "levels": [
+        {
+          "concurrency": 1,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 32,
+          "requests_ok": 32,
+          "sample_count": 32,
+          "duration_s": 69.75668378197588,
+          "waves": 32,
+          "whole_waves": true,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 69.75668378197588,
+          "requests_per_s": 0.45873740357290804,
+          "output_tokens": 4096,
+          "input_tokens": 16438,
+          "output_tokens_per_s": 58.71838765733223,
+          "total_tokens_per_s": 294.36605765519045,
+          "ttft_s": {
+            "mean": 0.25923114941542735,
+            "p50": 0.2586755004012957,
+            "p95": 0.26150749542284757,
+            "max": 0.2617637012153864
+          },
+          "itl_ms": {
+            "mean": 15.634474883853686,
+            "p50": 15.127112972550094,
+            "p95": 15.364425117149949
+          },
+          "e2e_s": {
+            "mean": 2.1798596972803352,
+            "p50": 2.17919124441687,
+            "p95": 2.1824931250419466
+          },
+          "per_request_output_tokens_per_s": 58.719407418524284,
+          "server_metrics_delta": {
+            "generation_tokens": 4096.0,
+            "prompt_tokens": 16438.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 2,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 32,
+          "requests_ok": 32,
+          "sample_count": 32,
+          "duration_s": 41.403257250087336,
+          "waves": 16,
+          "whole_waves": true,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 41.403257250087336,
+          "requests_per_s": 0.7728860511314601,
+          "output_tokens": 4096,
+          "input_tokens": 16438,
+          "output_tokens_per_s": 98.9294145448269,
+          "total_tokens_per_s": 495.95131793541884,
+          "ttft_s": {
+            "mean": 0.43038884393899934,
+            "p50": 0.49734424659982324,
+            "p95": 0.5201561645139009,
+            "max": 0.5297796989325434
+          },
+          "itl_ms": {
+            "mean": 17.570819260577665,
+            "p50": 16.349717043340206,
+            "p95": 16.66030117776245
+          },
+          "e2e_s": {
+            "mean": 2.5867026676496607,
+            "p50": 2.5931135965511203,
+            "p95": 2.5949206029763445
+          },
+          "per_request_output_tokens_per_s": 49.484649684096425,
+          "server_metrics_delta": {
+            "generation_tokens": 4096.0,
+            "prompt_tokens": 16438.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 4,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 32,
+          "requests_ok": 32,
+          "sample_count": 32,
+          "duration_s": 25.226457603974268,
+          "waves": 8,
+          "whole_waves": true,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 25.226457603974268,
+          "requests_per_s": 1.2685094555233392,
+          "output_tokens": 4096,
+          "input_tokens": 16438,
+          "output_tokens_per_s": 162.3692103069874,
+          "total_tokens_per_s": 813.9866612411328,
+          "ttft_s": {
+            "mean": 0.8301991083135363,
+            "p50": 0.7588828025618568,
+            "p95": 1.0016822129953653,
+            "max": 1.001884968020022
+          },
+          "itl_ms": {
+            "mean": 18.878066864862777,
+            "p50": 17.043746425770223,
+            "p95": 17.519502551294863
+          },
+          "e2e_s": {
+            "mean": 3.150421749378438,
+            "p50": 3.160641481517814,
+            "p95": 3.1618359043612143
+          },
+          "per_request_output_tokens_per_s": 40.63084038283638,
+          "server_metrics_delta": {
+            "generation_tokens": 4096.0,
+            "prompt_tokens": 16438.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 8,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 32,
+          "requests_ok": 32,
+          "sample_count": 32,
+          "duration_s": 17.630519360071048,
+          "waves": 4,
+          "whole_waves": true,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 17.630519360071048,
+          "requests_per_s": 1.8150344494372879,
+          "output_tokens": 4096,
+          "input_tokens": 16438,
+          "output_tokens_per_s": 232.32440952797285,
+          "total_tokens_per_s": 1164.6849182732897,
+          "ttft_s": {
+            "mean": 1.2359271797322435,
+            "p50": 1.220411891466938,
+            "p95": 1.9301320365048014,
+            "max": 1.9313805329147726
+          },
+          "itl_ms": {
+            "mean": 25.80952190497451,
+            "p50": 19.525720039382577,
+            "p95": 20.527070201933384
+          },
+          "e2e_s": {
+            "mean": 4.40292536879133,
+            "p50": 4.405343077611178,
+            "p95": 4.646308572764974
+          },
+          "per_request_output_tokens_per_s": 29.087999397285465,
+          "server_metrics_delta": {
+            "generation_tokens": 4096.0,
+            "prompt_tokens": 16438.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 16,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 32,
+          "requests_ok": 32,
+          "sample_count": 32,
+          "duration_s": 13.356806290103123,
+          "waves": 2,
+          "whole_waves": true,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 13.356806290103123,
+          "requests_per_s": 2.3957822929356074,
+          "output_tokens": 4096,
+          "input_tokens": 16438,
+          "output_tokens_per_s": 306.66013349575775,
+          "total_tokens_per_s": 1537.3435500981175,
+          "ttft_s": {
+            "mean": 2.221726420939376,
+            "p50": 2.358452553045936,
+            "p95": 3.7949088401161135,
+            "max": 3.7957352460362017
+          },
+          "itl_ms": {
+            "mean": 36.20721505497287,
+            "p50": 22.78793603181839,
+            "p95": 24.625660269521177
+          },
+          "e2e_s": {
+            "mean": 6.660762291925494,
+            "p50": 6.6485242755152285,
+            "p95": 7.871478574979119
+          },
+          "per_request_output_tokens_per_s": 19.36545336688869,
+          "server_metrics_delta": {
+            "generation_tokens": 4096.0,
+            "prompt_tokens": 16438.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 32,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 32,
+          "requests_ok": 32,
+          "sample_count": 32,
+          "duration_s": 11.503734376979992,
+          "waves": 1,
+          "whole_waves": true,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 11.503734376979992,
+          "requests_per_s": 2.781705396817479,
+          "output_tokens": 4096,
+          "input_tokens": 16438,
+          "output_tokens_per_s": 356.0582907926373,
+          "total_tokens_per_s": 1784.985581820316,
+          "ttft_s": {
+            "mean": 4.396311904834874,
+            "p50": 4.43974747043103,
+            "p95": 7.561747872678097,
+            "max": 7.562412395840511
+          },
+          "itl_ms": {
+            "mean": 57.1804423229539,
+            "p50": 31.422664178535342,
+            "p95": 61.56141241081059
+          },
+          "e2e_s": {
+            "mean": 11.423492315348994,
+            "p50": 11.431116578052752,
+            "p95": 11.497080316173378
+          },
+          "per_request_output_tokens_per_s": 11.20525370623822,
+          "server_metrics_delta": {
+            "generation_tokens": 4096.0,
+            "prompt_tokens": 16438.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 64,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 64,
+          "requests_ok": 64,
+          "sample_count": 64,
+          "duration_s": 21.348494208883494,
+          "waves": 1,
+          "whole_waves": true,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 21.348494208883494,
+          "requests_per_s": 2.997869515938433,
+          "output_tokens": 8192,
+          "input_tokens": 32886,
+          "output_tokens_per_s": 383.7272980401194,
+          "total_tokens_per_s": 1924.1638121206086,
+          "ttft_s": {
+            "mean": 8.154533631550294,
+            "p50": 8.173972700024024,
+            "p95": 14.70278234812431,
+            "max": 15.256935620913282
+          },
+          "itl_ms": {
+            "mean": 105.98719776082255,
+            "p50": 50.12602102942765,
+            "p95": 928.1303396448493
+          },
+          "e2e_s": {
+            "mean": 21.12130811797033,
+            "p50": 21.147688762983307,
+            "p95": 21.319764276163188
+          },
+          "per_request_output_tokens_per_s": 6.0605636129954386,
+          "server_metrics_delta": {
+            "generation_tokens": 8192.0,
+            "prompt_tokens": 32886.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        }
+      ],
+      "models_endpoint": {
+        "object": "list",
+        "data": [
+          {
+            "id": "Qwen/Qwen3.6-27B-FP8",
+            "object": "model",
+            "created": 1787741202,
+            "owned_by": "vllm",
+            "root": "Qwen/Qwen3.6-27B-FP8",
+            "parent": null,
+            "max_model_len": 131072,
+            "permission": [
+              {
+                "id": "modelperm-a6b9fafae1dffc76",
+                "object": "model_permission",
+                "created": 1787741202,
+                "allow_create_engine": false,
+                "allow_sampling": true,
+                "allow_logprobs": true,
+                "allow_search_indices": false,
+                "allow_view": true,
+                "allow_fine_tuning": false,
+                "organization": "*",
+                "group": null,
+                "is_blocking": false
+              }
+            ]
+          }
+        ]
+      },
+      "mode": "concurrency",
+      "finished_at_utc": "2026-08-26T10:50:04Z",
+      "between_run_spread": {
+        "1": {
+          "runs": 3,
+          "mean_tok_s": 58.77237146828997,
+          "stdev_tok_s": 0.07629953821933125,
+          "cov_pct": 0.12982211932778293,
+          "min_tok_s": 58.71838765733223,
+          "max_tok_s": 58.8596620524305
+        },
+        "2": {
+          "runs": 3,
+          "mean_tok_s": 98.85922986629839,
+          "stdev_tok_s": 0.0770861205891467,
+          "cov_pct": 0.07797564344108424,
+          "min_tok_s": 98.77672599718778,
+          "max_tok_s": 98.9294145448269
+        },
+        "4": {
+          "runs": 3,
+          "mean_tok_s": 162.3260409217048,
+          "stdev_tok_s": 0.03756416007497681,
+          "cov_pct": 0.023141179235126694,
+          "min_tok_s": 162.3007998301687,
+          "max_tok_s": 162.3692103069874
+        },
+        "8": {
+          "runs": 3,
+          "mean_tok_s": 232.32703937204712,
+          "stdev_tok_s": 0.08671267754516314,
+          "cov_pct": 0.037323540892845446,
+          "min_tok_s": 232.2416715311659,
+          "max_tok_s": 232.41503705700262
+        },
+        "16": {
+          "runs": 3,
+          "mean_tok_s": 307.10817251886743,
+          "stdev_tok_s": 0.40516417791583753,
+          "cov_pct": 0.13192881667483009,
+          "min_tok_s": 306.66013349575775,
+          "max_tok_s": 307.4488273012215
+        },
+        "32": {
+          "runs": 3,
+          "mean_tok_s": 356.0849868906682,
+          "stdev_tok_s": 0.03379863899238832,
+          "cov_pct": 0.009491733781735037,
+          "min_tok_s": 356.0582907926373,
+          "max_tok_s": 356.12298928534886
+        },
+        "64": {
+          "runs": 3,
+          "mean_tok_s": 384.32482839719427,
+          "stdev_tok_s": 0.5324854522103456,
+          "cov_pct": 0.1385508853099726,
+          "min_tok_s": 383.7272980401194,
+          "max_tok_s": 384.74912787819983
+        }
+      },
+      "repeats": 3
+    }
+  },
+  "fingerprint": {
+    "inputs": "1.0|base|shared|0||",
+    "hash": "0f045dcc6f0ae85c"
+  },
+  "artifact": {
+    "tool": "gpubench",
+    "version": "1.0.1",
+    "source_sha256": "77b219b55fe040cfbce0cd9a7f4a605876e5f32c7d2df2fa685d4096344ada50",
+    "note": "source_sha256 is over every .py file in the installed package, so a result can be tied to the exact measurement code that produced it. Quote the version and this digest wherever the results are published."
+  }
+}

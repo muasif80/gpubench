@@ -11,8 +11,13 @@ __pycache__/
 # they are still one estate's data rather than the tool, and a general-purpose benchmark that
 # ships someone's numbers invites those numbers to be quoted as the tool's own. Publish results
 # where they belong: alongside the report that interprets them.
-results/
-reports/
+#
+# ANCHORED to the repository root. Written as `results/` these matched a directory of that name at
+# ANY depth, which silently swallowed examples/results/ -- the worked example the README promises
+# and the reproduction-record CI job reads. The rule did exactly what it said and not what it
+# meant, and nothing noticed until a clean checkout could not find the file.
+/results/
+/reports/
 
 # Site-specific redaction terms. This file names an estate's own nouns; keeping it out of the tool
 # is the whole point of the mechanism (see README, "The redaction gate").

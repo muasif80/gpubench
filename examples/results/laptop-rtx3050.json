@@ -1,0 +1,218 @@
+{
+  "schema_version": "1.0",
+  "tool": "gpubench",
+  "profile": "base",
+  "mode": "shared",
+  "started_at_utc": "2026-08-25T15:29:22Z",
+  "orchestrator": {
+    "platform": "Windows",
+    "python": "3.13.14",
+    "transport": "local",
+    "target": "not recorded"
+  },
+  "probes": {
+    "inventory": {
+      "probe": "inventory",
+      "tier": 0,
+      "captured_at_utc": "2026-08-25T15:29:24Z",
+      "platform": "Windows",
+      "host": {
+        "os": "Windows-11-10.0.26200-SP0",
+        "kernel": "10.0.26200",
+        "cpu": "12th Gen Intel(R) Core(TM) i7-12650H",
+        "cpu_threads": 16,
+        "board_vendor": "HP",
+        "board_name": "8A4F",
+        "bios_version": "F.31",
+        "memory_bytes": 34011598848
+      },
+      "gpus": [
+        {
+          "index": 0,
+          "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+          "uuid": null,
+          "serial": null,
+          "driver_version": 592.82,
+          "vbios_version": "94.07.56.40.17",
+          "memory_total": 4096,
+          "memory_used": 0,
+          "memory_free": 3962,
+          "pstate": "P0",
+          "temperature_gpu": 67,
+          "fan_speed": null,
+          "power_draw": 13.89,
+          "power_limit": null,
+          "power_max_limit": 75.0,
+          "clocks_sm": 1500,
+          "clocks_max_sm": 2100,
+          "clocks_mem": 5871,
+          "clocks_max_mem": 5871,
+          "pcie_link_gen_current": 4,
+          "pcie_link_gen_max": 4,
+          "pcie_link_width_current": 8,
+          "pcie_link_width_max": 16,
+          "persistence_mode": null,
+          "compute_mode": "Default",
+          "ecc_mode_current": null,
+          "utilization_gpu": 0,
+          "utilization_memory": 0,
+          "clocks_event_reasons_hw_thermal_slowdown": "Not Active",
+          "clocks_event_reasons_sw_power_cap": "Not Active"
+        }
+      ],
+      "gpu_processes": [],
+      "pcie_links": [],
+      "topology": "ERROR: Option -m is missing its value. Please run 'nvidia-smi -h' for help.",
+      "containers": [],
+      "warnings": [
+        "GPU0: PCIe link negotiated x8 where the card supports x16. Host and peer transfers are link-limited.",
+        "Only 3962 MiB free on the tightest GPU: another workload is resident, so compute and bandwidth results are FLOORS, not peaks."
+      ]
+    },
+    "cuda_driver": {
+      "probe": "cuda_driver",
+      "tier": 2,
+      "devices": [
+        {
+          "index": 0,
+          "name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+          "total_bytes": 4294443008,
+          "max_threads_per_block": 1024,
+          "clock_rate_khz": 1500000,
+          "multiprocessor_count": 16,
+          "memory_clock_rate_khz": 5871000,
+          "global_memory_bus_width": 128,
+          "l2_cache_size": 1572864,
+          "max_threads_per_multiprocessor": 1536,
+          "pci_bus_id": 1,
+          "pci_device_id": 0,
+          "pci_domain_id": 0,
+          "integrated": 0,
+          "unified_addressing": 1,
+          "compute_capability": "8.6",
+          "naive_peak_bandwidth_gb_s": 187.872,
+          "selected": true
+        }
+      ],
+      "memory_bandwidth": [
+        {
+          "size_bytes": 268435456,
+          "gb_s_best": 179.42779546068263,
+          "gb_s_median": 179.42779546068263,
+          "device": 0,
+          "test": "device_copy"
+        }
+      ],
+      "host_transfer": [
+        {
+          "direction": "h2d",
+          "size_bytes": 268435456,
+          "gb_s_best": 12.637156845353065,
+          "gb_s_median": 12.547877941163364,
+          "device": 0
+        },
+        {
+          "direction": "d2h",
+          "size_bytes": 268435456,
+          "gb_s_best": 12.945482701580051,
+          "gb_s_median": 12.866989882065544,
+          "device": 0
+        }
+      ],
+      "cache_sweep": [
+        {
+          "size_bytes": 1048576,
+          "gb_s_best": 138.55391331988494,
+          "gb_s_median": 129.0078672969239,
+          "device": 0,
+          "size_mib": 1,
+          "fits_in_l2": true
+        },
+        {
+          "size_bytes": 4194304,
+          "gb_s_best": 113.7777737533606,
+          "gb_s_median": 112.21917364686371,
+          "device": 0,
+          "size_mib": 4,
+          "fits_in_l2": false
+        },
+        {
+          "size_bytes": 16777216,
+          "gb_s_best": 174.2978672996374,
+          "gb_s_median": 173.37566275198955,
+          "device": 0,
+          "size_mib": 16,
+          "fits_in_l2": false
+        },
+        {
+          "size_bytes": 67108864,
+          "gb_s_best": 178.5722068162002,
+          "gb_s_median": 177.39400897615084,
+          "device": 0,
+          "size_mib": 64,
+          "fits_in_l2": false
+        },
+        {
+          "size_bytes": 134217728,
+          "gb_s_best": 179.1825061016787,
+          "gb_s_median": 178.94933365925732,
+          "device": 0,
+          "size_mib": 128,
+          "fits_in_l2": false
+        },
+        {
+          "size_bytes": 268435456,
+          "gb_s_best": 179.50074060086186,
+          "gb_s_median": 179.42779546068263,
+          "device": 0,
+          "size_mib": 256,
+          "fits_in_l2": false
+        }
+      ],
+      "errors": [],
+      "platform": "Windows",
+      "driver_api_version": "13.1"
+    },
+    "torch_compute": {
+      "probe": "torch_compute",
+      "tier": 1,
+      "mode": "shared",
+      "started_at_utc": "2026-08-25T15:29:28Z",
+      "config": {
+        "vram_budget_mb": 700,
+        "iters": 5,
+        "sections": [
+          "matmul",
+          "membw",
+          "host",
+          "p2p",
+          "sustained"
+        ],
+        "sustain_seconds": 12
+      },
+      "devices": [],
+      "matmul": [],
+      "memory_bandwidth": [],
+      "cache_sweep": [],
+      "host_transfer": [],
+      "p2p": [],
+      "sustained": [],
+      "errors": [
+        "import torch failed: ModuleNotFoundError(\"No module named 'torch'\")"
+      ],
+      "finished_at_utc": "2026-08-25T15:29:28Z"
+    }
+  },
+  "finished_at_utc": "2026-08-25T15:29:28Z",
+  "fingerprint": {
+    "inputs": "1.0|base|shared|1|NVIDIA GeForce RTX 3050 Laptop GPU|592.82",
+    "hash": "fd6561728d774c9b"
+  },
+  "sanitised": {
+    "note": "Deployment-identifying fields were removed so this result can be shared.",
+    "removed": [
+      "GPU uuid"
+    ],
+    "retained": "GPU model, driver, board, CPU, clocks, PCIe topology and all measurements"
+  }
+}

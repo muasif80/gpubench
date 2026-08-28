@@ -1,0 +1,13 @@
+{
+  "note": "These are the TOOL's own result files, which the tool sanitises on every run: the target host, container names and images, process names, and device UUIDs and serials are removed, and each file carries its own 'sanitised' block listing what went.",
+  "what_is_here": {
+    "onprem-2x5090.json": "compute by precision, sustained power, capabilities, all-reduce sweep, embeddings, quality gate",
+    "onprem-2x5090-serving-v2.json": "the corrected serving sweep -- the capacity curve and the reproducibility spread the report's serving tables are built from",
+    "onprem-2x5090-workload.json": "the workload disclosure run: requested-versus-counted tokens, prefix-cache counters, quality-gate cases",
+    "laptop-rtx3050.json": "a second, very different machine, for contrast"
+  },
+  "what_is_NOT_here": {
+    "the report harness run directory": "The roofs, the NCCL sweep, the prefill isolation and the roofline derivation come from a separate harness that predates this tool and does NOT sanitise its own output. Its files carry filesystem paths, device UUIDs and host network topology. Publishing them would need a redaction pass they never had, and shipping a half-redacted file is worse than shipping none: the gate in this tool refused three separate attempts while this directory was being prepared, each time correctly. That is the remaining gap in the report's raw-data claim and it is stated rather than papered over."
+  },
+  "how_to_check": "Every one of these files passes `python -m gpubench.longform.redact examples/` in this repository. That is the same gate that refused the harness run."
+}

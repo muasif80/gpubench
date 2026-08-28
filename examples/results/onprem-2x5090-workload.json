@@ -1,0 +1,789 @@
+{
+  "schema_version": "1.0",
+  "tool": "gpubench",
+  "profile": "base",
+  "mode": "shared",
+  "started_at_utc": "2026-08-25T19:37:46Z",
+  "orchestrator": {
+    "platform": "Windows",
+    "python": "3.13.14",
+    "transport": "plink",
+    "target": "not recorded"
+  },
+  "probes": {
+    "inventory": {
+      "probe": "inventory",
+      "tier": 0,
+      "captured_at_utc": "2026-08-25T19:37:50Z",
+      "platform": "Linux",
+      "host": {
+        "os": "Ubuntu 24.04.3 LTS",
+        "kernel": "6.8.0-137-generic",
+        "cpu_threads": 32,
+        "cpu": "Intel(R) Core(TM) i9-14900K",
+        "memory_bytes": 134761586688,
+        "board_vendor": "Micro-Star International Co., Ltd.",
+        "board_name": "MAG Z790 TOMAHAWK MAX WIFI (MS-7E25)",
+        "bios_version": "A.A0",
+        "bios_date": "08/04/2025",
+        "product_name": "MS-7E25"
+      },
+      "gpus": [
+        {
+          "index": 0,
+          "name": "NVIDIA GeForce RTX 5090",
+          "uuid": null,
+          "serial": 0,
+          "driver_version": "590.48.01",
+          "vbios_version": "98.02.2E.40.AF",
+          "memory_total": 32607,
+          "memory_used": 28665,
+          "memory_free": 3447,
+          "pstate": "P1",
+          "temperature_gpu": 54,
+          "fan_speed": 33,
+          "power_draw": 169.68,
+          "power_limit": 575.0,
+          "power_max_limit": 575.0,
+          "clocks_sm": 2872,
+          "clocks_max_sm": 3090,
+          "clocks_mem": 13801,
+          "clocks_max_mem": 14001,
+          "pcie_link_gen_current": 5,
+          "pcie_link_gen_max": 5,
+          "pcie_link_width_current": 16,
+          "pcie_link_width_max": 16,
+          "persistence_mode": "Disabled",
+          "compute_mode": "Default",
+          "ecc_mode_current": null,
+          "utilization_gpu": 0,
+          "utilization_memory": 0,
+          "clocks_event_reasons_hw_thermal_slowdown": "Not Active",
+          "clocks_event_reasons_sw_power_cap": "Not Active"
+        },
+        {
+          "index": 1,
+          "name": "NVIDIA GeForce RTX 5090",
+          "uuid": null,
+          "serial": 0,
+          "driver_version": "590.48.01",
+          "vbios_version": "98.02.2E.40.AF",
+          "memory_total": 32607,
+          "memory_used": 26380,
+          "memory_free": 5710,
+          "pstate": "P1",
+          "temperature_gpu": 45,
+          "fan_speed": 30,
+          "power_draw": 150.67,
+          "power_limit": 575.0,
+          "power_max_limit": 575.0,
+          "clocks_sm": 2872,
+          "clocks_max_sm": 3090,
+          "clocks_mem": 13801,
+          "clocks_max_mem": 14001,
+          "pcie_link_gen_current": 4,
+          "pcie_link_gen_max": 4,
+          "pcie_link_width_current": 4,
+          "pcie_link_width_max": 16,
+          "persistence_mode": "Disabled",
+          "compute_mode": "Default",
+          "ecc_mode_current": null,
+          "utilization_gpu": 0,
+          "utilization_memory": 0,
+          "clocks_event_reasons_hw_thermal_slowdown": "Not Active",
+          "clocks_event_reasons_sw_power_cap": "Not Active"
+        }
+      ],
+      "gpu_processes": [
+        {
+          "used_mib": 2296,
+          "process": "(redacted)"
+        },
+        {
+          "used_mib": 26354,
+          "process": "(redacted)"
+        },
+        {
+          "used_mib": 26354,
+          "process": "(redacted)"
+        }
+      ],
+      "pcie_links": [
+        {
+          "bdf": "0000:01:00.0",
+          "current_speed": "32.0 GT/s PCIe",
+          "max_speed": "32.0 GT/s PCIe",
+          "current_width": 16,
+          "max_width": 16,
+          "parent_bridge": "0000:00:01.0",
+          "bridge_max_speed": "32.0 GT/s PCIe",
+          "bridge_max_width": 16
+        },
+        {
+          "bdf": "0000:07:00.0",
+          "current_speed": "16.0 GT/s PCIe",
+          "max_speed": "32.0 GT/s PCIe",
+          "current_width": 4,
+          "max_width": 16,
+          "parent_bridge": "0000:00:1d.0",
+          "bridge_max_speed": "16.0 GT/s PCIe",
+          "bridge_max_width": 4
+        }
+      ],
+      "topology": "\u001b[4mGPU0\tGPU1\tCPU Affinity\tNUMA Affinity\tGPU NUMA ID\u001b[0m\nGPU0\t X \tPHB\t0-31\t0\t\tN/A\nGPU1\tPHB\t X \t0-31\t0\t\tN/A\n\nLegend:\n\n  X    = Self\n  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n  PIX  = Connection traversing at most a single PCIe bridge\n  NV#  = Connection traversing a bonded set of # NVLinks",
+      "containers": [],
+      "warnings": [
+        "GPU0: persistence mode disabled, so idle clocks drop to the lowest P-state. Any measurement without warmup times the clock ramp.",
+        "GPU1: persistence mode disabled, so idle clocks drop to the lowest P-state. Any measurement without warmup times the clock ramp.",
+        "GPU1: PCIe link negotiated x4 where the card supports x16. Host and peer transfers are link-limited.",
+        "GPUs sit on ASYMMETRIC PCIe links. Without NVLink, collective operations run at the slower card's rate: 0000:01:00.0 -> 0000:00:01.0 32.0 GT/s PCIex16; 0000:07:00.0 -> 0000:00:1d.0 16.0 GT/s PCIex4",
+        "Only 3447 MiB free on the tightest GPU: another workload is resident, so compute and bandwidth results are FLOORS, not peaks."
+      ],
+      "container_count": 19
+    },
+    "serve_bench": {
+      "benchmark": "serve_bench",
+      "label": "",
+      "started_at_utc": "2026-08-25T19:37:50Z",
+      "config": {
+        "base_url": "http://127.0.0.1:8000/v1",
+        "model": "Qwen/Qwen3.6-27B-FP8",
+        "endpoint": "completions",
+        "concurrency": "1,2,4,8,16,32,64",
+        "requests": 16,
+        "requests_multiplier": 1.0,
+        "input_tokens": 512,
+        "output_tokens": 128,
+        "timeout": 600.0,
+        "warmup": 1,
+        "label": "",
+        "mode": "concurrency",
+        "input_lengths": "128,512,2048,8192,32768",
+        "output_lengths": "128,512"
+      },
+      "workload": {
+        "kind": "synthetic",
+        "template": "Request <salt>. <filler> \\n Summarize:",
+        "filler_token": "lorem",
+        "salt": "a distinct integer per request, placed FIRST so it cannot share a cached prefix with any other request",
+        "length_control": "requested length is in words; one filler word is approximately one BPE token. The engine's own prompt_tokens counter is what gets reported, and both values are recorded per level so the approximation is auditable rather than assumed.",
+        "why_synthetic": "exact length control, no licensing entanglement, and prefix-cache defeat by construction. The cost is that it says nothing about content-sensitive behaviour, so no quality claim may rest on it.",
+        "not_claimed": "This is not an MLPerf-style fixed dataset. MLPerf mandates specific corpora (OpenORCA, CNN-DailyMail) because the input distribution is part of the benchmark definition; results here are therefore comparable across runs of this tool, but not with MLPerf submissions."
+      },
+      "levels": [
+        {
+          "concurrency": 1,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 16,
+          "requests_ok": 16,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 34.85622695600614,
+          "requests_per_s": 0.45902845480649507,
+          "output_tokens": 2048,
+          "input_tokens": 8214,
+          "output_tokens_per_s": 58.75564221523137,
+          "total_tokens_per_s": 294.4093752015158,
+          "ttft_s": {
+            "mean": 0.2604982407792704,
+            "p50": 0.26129533257335424,
+            "p95": 0.2622728817514144,
+            "max": 0.26249718200415373
+          },
+          "itl_ms": {
+            "mean": 15.600768252558549,
+            "p50": 15.102276112884283,
+            "p95": 15.315168420784175
+          },
+          "e2e_s": {
+            "mean": 2.178463889329578,
+            "p50": 2.178707988583483,
+            "p95": 2.1807683932129294
+          },
+          "per_request_output_tokens_per_s": 58.75703858577319,
+          "server_metrics_delta": {
+            "generation_tokens": 2048.0,
+            "prompt_tokens": 8214.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 2,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 16,
+          "requests_ok": 16,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 20.648619323037565,
+          "requests_per_s": 0.7748702104333377,
+          "output_tokens": 2048,
+          "input_tokens": 8214,
+          "output_tokens_per_s": 99.18338693546723,
+          "total_tokens_per_s": 496.9823812166819,
+          "ttft_s": {
+            "mean": 0.44858061356353574,
+            "p50": 0.4974472029134631,
+            "p95": 0.5227896660799161,
+            "max": 0.5293545420281589
+          },
+          "itl_ms": {
+            "mean": 17.242244907975625,
+            "p50": 16.319997143000364,
+            "p95": 16.58121645450592
+          },
+          "e2e_s": {
+            "mean": 2.579118228459265,
+            "p50": 2.5689126163488254,
+            "p95": 2.594222626532428
+          },
+          "per_request_output_tokens_per_s": 49.63048218140667,
+          "server_metrics_delta": {
+            "generation_tokens": 2048.0,
+            "prompt_tokens": 8214.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 4,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 16,
+          "requests_ok": 16,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 12.617154107894748,
+          "requests_per_s": 1.2681148112464247,
+          "output_tokens": 2048,
+          "input_tokens": 8214,
+          "output_tokens_per_s": 162.31869583954236,
+          "total_tokens_per_s": 813.3371370631756,
+          "ttft_s": {
+            "mean": 0.8104409503721399,
+            "p50": 0.7570306620327756,
+            "p95": 1.0035818035248667,
+            "max": 1.0089828791096807
+          },
+          "itl_ms": {
+            "mean": 19.303250030739925,
+            "p50": 17.013078089803457,
+            "p95": 17.531315330415964
+          },
+          "e2e_s": {
+            "mean": 3.1484641337156063,
+            "p50": 3.1563238309463486,
+            "p95": 3.1596792350756004
+          },
+          "per_request_output_tokens_per_s": 40.6552248584893,
+          "server_metrics_delta": {
+            "generation_tokens": 2048.0,
+            "prompt_tokens": 8214.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 8,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 16,
+          "requests_ok": 16,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 8.778251141076908,
+          "requests_per_s": 1.8226865172642048,
+          "output_tokens": 2048,
+          "input_tokens": 8214,
+          "output_tokens_per_s": 233.30387420981822,
+          "total_tokens_per_s": 1169.0255650103293,
+          "ttft_s": {
+            "mean": 1.3424562292202609,
+            "p50": 1.433738030376844,
+            "p95": 1.9060168996220455,
+            "max": 1.906063221860677
+          },
+          "itl_ms": {
+            "mean": 24.596229949668693,
+            "p50": 19.4796749856323,
+            "p95": 20.17715508118272
+          },
+          "e2e_s": {
+            "mean": 4.37552505666099,
+            "p50": 4.37270119250752,
+            "p95": 4.6158811544883065
+          },
+          "per_request_output_tokens_per_s": 29.295446477893993,
+          "server_metrics_delta": {
+            "generation_tokens": 2048.0,
+            "prompt_tokens": 8214.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 16,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 16,
+          "requests_ok": 16,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 6.667509173043072,
+          "requests_per_s": 2.3996967360297683,
+          "output_tokens": 2048,
+          "input_tokens": 8214,
+          "output_tokens_per_s": 307.16118221181034,
+          "total_tokens_per_s": 1539.1054940710926,
+          "ttft_s": {
+            "mean": 2.4823740770370932,
+            "p50": 2.5858930085087195,
+            "p95": 3.790064902335871,
+            "max": 3.7905746549367905
+          },
+          "itl_ms": {
+            "mean": 33.553430171932725,
+            "p50": 22.71860500331968,
+            "p95": 23.82108013844117
+          },
+          "e2e_s": {
+            "mean": 6.634646951002651,
+            "p50": 6.638705942896195,
+            "p95": 6.664059576170985
+          },
+          "per_request_output_tokens_per_s": 19.292974115166473,
+          "server_metrics_delta": {
+            "generation_tokens": 2048.0,
+            "prompt_tokens": 8214.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 32,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 32,
+          "requests_ok": 32,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 11.495629962068051,
+          "requests_per_s": 2.7836664981031833,
+          "output_tokens": 4096,
+          "input_tokens": 16438,
+          "output_tokens_per_s": 356.30931175720747,
+          "total_tokens_per_s": 1786.2439960015863,
+          "ttft_s": {
+            "mean": 4.395595935115125,
+            "p50": 4.438720936072059,
+            "p95": 7.559502517885994,
+            "max": 7.560089915059507
+          },
+          "itl_ms": {
+            "mean": 57.12230620294192,
+            "p50": 31.377429491840303,
+            "p95": 61.5626176120713
+          },
+          "e2e_s": {
+            "mean": 11.414536114847579,
+            "p50": 11.421903150505386,
+            "p95": 11.488030629965943
+          },
+          "per_request_output_tokens_per_s": 11.214043425834523,
+          "server_metrics_delta": {
+            "generation_tokens": 4096.0,
+            "prompt_tokens": 16438.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        },
+        {
+          "concurrency": 64,
+          "input_tokens_requested": 512,
+          "output_tokens_requested": 128,
+          "prefill_tokens_per_s": null,
+          "requests_attempted": 64,
+          "requests_ok": 64,
+          "errors": [],
+          "error_count": 0,
+          "wall_s": 21.302436121972278,
+          "requests_per_s": 3.0043512222523487,
+          "output_tokens": 8192,
+          "input_tokens": 32886,
+          "output_tokens_per_s": 384.55695644830064,
+          "total_tokens_per_s": 1928.324054807531,
+          "ttft_s": {
+            "mean": 8.150802725325775,
+            "p50": 7.9255890644853935,
+            "p95": 15.09442098641302,
+            "max": 15.209234761074185
+          },
+          "itl_ms": {
+            "mean": 105.76612903546793,
+            "p50": 50.0671761110425,
+            "p95": 926.4075835584663
+          },
+          "e2e_s": {
+            "mean": 21.08198442486173,
+            "p50": 21.09876602049917,
+            "p95": 21.285546648118178
+          },
+          "per_request_output_tokens_per_s": 6.071852798563741,
+          "server_metrics_delta": {
+            "generation_tokens": 8192.0,
+            "prompt_tokens": 32886.0,
+            "kv_cache_usage_end": 0.0,
+            "requests_waiting_end": 0.0,
+            "prefix_cache_queries": 0.0,
+            "prefix_cache_hits": 0.0,
+            "prefix_cache_hit_pct": 0.0
+          }
+        }
+      ],
+      "models_endpoint": {
+        "object": "list",
+        "data": [
+          {
+            "id": "Qwen/Qwen3.6-27B-FP8",
+            "object": "model",
+            "created": 1787686670,
+            "owned_by": "vllm",
+            "root": "Qwen/Qwen3.6-27B-FP8",
+            "parent": null,
+            "max_model_len": 131072,
+            "permission": [
+              {
+                "id": "modelperm-ac91079aee34c3f5",
+                "object": "model_permission",
+                "created": 1787686670,
+                "allow_create_engine": false,
+                "allow_sampling": true,
+                "allow_logprobs": true,
+                "allow_search_indices": false,
+                "allow_view": true,
+                "allow_fine_tuning": false,
+                "organization": "*",
+                "group": null,
+                "is_blocking": false
+              }
+            ]
+          }
+        ]
+      },
+      "mode": "concurrency",
+      "finished_at_utc": "2026-08-25T19:39:49Z"
+    },
+    "embed_bench": {
+      "benchmark": "embed_bench",
+      "started_at_utc": "2026-08-25T19:39:50Z",
+      "config": {
+        "base_url": "http://127.0.0.1:8001/v1",
+        "model": "BAAI/bge-m3",
+        "batch": "1,8,32",
+        "concurrency": "1,4",
+        "requests": 8,
+        "input_tokens": 256,
+        "timeout": 300.0
+      },
+      "cells": [
+        {
+          "batch": 1,
+          "concurrency": 1,
+          "requests_ok": 8,
+          "error_count": 0,
+          "errors": [],
+          "wall_s": 0.06768750119954348,
+          "embeddings_per_s": 118.1902102784961,
+          "tokens_per_s": 60040.62682147601,
+          "latency_s": {
+            "mean": 0.008423990104347467,
+            "p50": 0.007873542956076562,
+            "p95": 0.011080969823524352
+          }
+        },
+        {
+          "batch": 1,
+          "concurrency": 4,
+          "requests_ok": 8,
+          "error_count": 0,
+          "errors": [],
+          "wall_s": 0.03522936697117984,
+          "embeddings_per_s": 227.0832742054257,
+          "tokens_per_s": 115358.30329635626,
+          "latency_s": {
+            "mean": 0.01485642121406272,
+            "p50": 0.014689206494949758,
+            "p95": 0.01962095466442406
+          }
+        },
+        {
+          "batch": 8,
+          "concurrency": 1,
+          "requests_ok": 8,
+          "error_count": 0,
+          "errors": [],
+          "wall_s": 0.2214230909012258,
+          "embeddings_per_s": 289.0394120121358,
+          "tokens_per_s": 146832.02130216497,
+          "latency_s": {
+            "mean": 0.027608652890194207,
+            "p50": 0.02793980552814901,
+            "p95": 0.029239983193110674
+          }
+        },
+        {
+          "batch": 8,
+          "concurrency": 4,
+          "requests_ok": 8,
+          "error_count": 0,
+          "errors": [],
+          "wall_s": 0.13346736901439726,
+          "embeddings_per_s": 479.5179561312567,
+          "tokens_per_s": 243595.12171467842,
+          "latency_s": {
+            "mean": 0.058745905465912074,
+            "p50": 0.05837670248001814,
+            "p95": 0.07306634241249413
+          }
+        },
+        {
+          "batch": 32,
+          "concurrency": 1,
+          "requests_ok": 8,
+          "error_count": 0,
+          "errors": [],
+          "wall_s": 0.6438259470742196,
+          "embeddings_per_s": 397.62299292744814,
+          "tokens_per_s": 202012.67219975323,
+          "latency_s": {
+            "mean": 0.08037471232819371,
+            "p50": 0.07980462803971022,
+            "p95": 0.0837722028256394
+          }
+        },
+        {
+          "batch": 32,
+          "concurrency": 4,
+          "requests_ok": 8,
+          "error_count": 0,
+          "errors": [],
+          "wall_s": 0.5003458720166236,
+          "embeddings_per_s": 511.6460718826408,
+          "tokens_per_s": 259942.18654346932,
+          "latency_s": {
+            "mean": 0.22081725890166126,
+            "p50": 0.16141735506244004,
+            "p95": 0.4113660500501282
+          }
+        }
+      ],
+      "workload": {
+        "kind": "synthetic",
+        "requested_length_words": 256,
+        "template": "doc <salt> <filler repeated>",
+        "filler_token": "clause",
+        "salt": "distinct per document, so no two inputs are identical",
+        "length_note": "Requested length is in WORDS. An embedding model's tokenizer may split the filler word into more than one token, so the true token count per document is typically higher than the requested number; tokens_per_s divided by embeddings_per_s gives the actual figure and is the one to quote.",
+        "why_synthetic": "exact length control and no licensing entanglement. Retrieval quality is not measured and no claim about it is supportable from this."
+      },
+      "cells_note": "throughput only; recall and ranking quality are out of scope",
+      "finished_at_utc": "2026-08-25T19:39:51Z"
+    },
+    "accuracy": {
+      "probe": "accuracy",
+      "tier": 0,
+      "started_at_utc": "2026-08-25T19:39:52Z",
+      "model": "Qwen/Qwen3.6-27B-FP8",
+      "cases": [
+        {
+          "prompt": "What is 17 plus 26? Reply with the number only.",
+          "answers": [
+            "43",
+            "43"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "What is 12 times 12? Reply with the number only.",
+          "answers": [
+            "144",
+            "144"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "What is 100 minus 37? Reply with the number only.",
+          "answers": [
+            "63",
+            "63"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "What is half of 250? Reply with the number only.",
+          "answers": [
+            "125",
+            "125"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "How many days are in a week? Reply with the number only.",
+          "answers": [
+            "7",
+            "7"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "What is the capital city of France? Reply with one word.",
+          "answers": [
+            "Paris",
+            "Paris"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "What colour is the sky on a clear day? Reply with one word.",
+          "answers": [
+            "Blue",
+            "Blue"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "Complete: two, four, six, ____ . Reply with the number only.",
+          "answers": [
+            "8",
+            "8"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "Is 9 greater than 4? Answer yes or no.",
+          "answers": [
+            "Yes",
+            "Yes"
+          ],
+          "deterministic": true,
+          "correct": true
+        },
+        {
+          "prompt": "Spell the word CAT in lowercase. Reply with one word.",
+          "answers": [
+            "cat",
+            "cat"
+          ],
+          "deterministic": true,
+          "correct": true
+        }
+      ],
+      "errors": [],
+      "method": {
+        "decode": "greedy (temperature 0, top_p 1, fixed seed)",
+        "repeats": 2,
+        "determinism": "identical output across repeats of the same prompt",
+        "exact_match": "regex over the answer, single verifiable fact per case",
+        "cases_published": [
+          {
+            "prompt": "What is 17 plus 26? Reply with the number only.",
+            "accept_pattern": "\\b43\\b"
+          },
+          {
+            "prompt": "What is 12 times 12? Reply with the number only.",
+            "accept_pattern": "\\b144\\b"
+          },
+          {
+            "prompt": "What is 100 minus 37? Reply with the number only.",
+            "accept_pattern": "\\b63\\b"
+          },
+          {
+            "prompt": "What is half of 250? Reply with the number only.",
+            "accept_pattern": "\\b125\\b"
+          },
+          {
+            "prompt": "How many days are in a week? Reply with the number only.",
+            "accept_pattern": "\\b7\\b"
+          },
+          {
+            "prompt": "What is the capital city of France? Reply with one word.",
+            "accept_pattern": "(?i)paris"
+          },
+          {
+            "prompt": "What colour is the sky on a clear day? Reply with one word.",
+            "accept_pattern": "(?i)blue"
+          },
+          {
+            "prompt": "Complete: two, four, six, ____ . Reply with the number only.",
+            "accept_pattern": "\\b8\\b|eight"
+          },
+          {
+            "prompt": "Is 9 greater than 4? Answer yes or no.",
+            "accept_pattern": "(?i)\\byes\\b"
+          },
+          {
+            "prompt": "Spell the word CAT in lowercase. Reply with one word.",
+            "accept_pattern": "(?i)\\bcat\\b"
+          }
+        ],
+        "note": "This is a REGRESSION gate, not a capability benchmark. It detects a stack that has broken or been over-quantised; it says nothing about model quality."
+      },
+      "summary": {
+        "cases": 10,
+        "deterministic": 10,
+        "determinism_pct": 100.0,
+        "correct": 10,
+        "exact_match_pct": 100.0,
+        "verdict": "PASS"
+      }
+    }
+  },
+  "finished_at_utc": "2026-08-25T19:39:50Z",
+  "sanitised": {
+    "note": "Deployment-identifying fields were removed so this result can be shared.",
+    "removed": [
+      "GPU process names and PIDs",
+      "GPU uuid",
+      "container names, images and port bindings"
+    ],
+    "retained": "GPU model, driver, board, CPU, clocks, PCIe topology and all measurements"
+  },
+  "fingerprint": {
+    "inputs": "1.0|base|shared|2|NVIDIA GeForce RTX 5090|590.48.01",
+    "hash": "d4cf6ddc0a1e9157"
+  }
+}
